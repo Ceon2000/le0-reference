@@ -10,6 +10,12 @@ import time
 import hashlib
 from typing import Optional, Dict, Any
 
+
+def _progress(msg: str) -> None:
+    """Print progress message to stderr unless QUIET=1."""
+    if os.environ.get("QUIET", "0") != "1":
+        print(f"[PROGRESS] {msg}", file=sys.stderr)
+
 try:
     from vllm import LLM, SamplingParams
 except ImportError:
@@ -34,8 +40,10 @@ def _ensure_model_loaded():
     
     if _llm is None or _model_id != current_model_id:
         try:
+            _progress(f"Loading model: {current_model_id}...")
             _llm = LLM(model=current_model_id, trust_remote_code=True)
             _model_id = current_model_id
+            _progress("Model loaded successfully")
         except Exception as e:
             print(f"[TARGET] ERROR: Failed to load model '{current_model_id}': {e}", file=sys.stderr)
             raise
@@ -135,12 +143,11 @@ def run(step_name: str, **kwargs) -> bytes:
         # Calculate hash
         output_hash = hashlib.sha256(output_bytes).hexdigest()[:8]
         
-        # Print metrics (IP-safe: no text output)
+        # Print metrics to stdout (IP-safe: no text output)
         print(
             f"[TARGET] step={step_name} latency_ms={latency_ms:.2f} "
             f"prompt_tokens={prompt_tokens} decode_tokens={decode_tokens} "
-            f"local_out_hash={output_hash}",
-            file=sys.stderr
+            f"local_out_hash={output_hash}"
         )
         
         return output_bytes

@@ -1,6 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
+# Progress logging function (prints to stderr with [PROGRESS] prefix unless QUIET=1)
+log() {
+    if [ "${QUIET:-0}" != "1" ]; then
+        echo "[PROGRESS] $*" >&2
+    fi
+}
+
 # Parse MODE (defaults to le0)
 MODE="${MODE:-le0}"
 if [ "$MODE" != "standalone" ] && [ "$MODE" != "le0" ]; then
@@ -17,7 +24,7 @@ if [ "$MODE" = "le0" ] && [ -z "${LE0_WHEEL:-}" ]; then
     exit 1
 fi
 
-# Print banner (exact format required)
+# Print banner (exact format required) - goes to stdout
 if [ "$MODE" = "standalone" ]; then
     echo "vLLM Standalone"
 elif [ "$MODE" = "le0" ]; then
@@ -28,15 +35,21 @@ fi
 export MODEL="${MODEL:-allenai/Olmo-3-7B-Think}"
 
 # Create virtual environment
+log "Creating virtual environment..."
 python3 -m venv venv > /dev/null 2>&1
 source venv/bin/activate
+log "Virtual environment activated"
 
 # Install requirements
+log "Installing requirements..."
 pip install --quiet -r requirements.txt > /dev/null 2>&1
+log "Requirements installed"
 
 # Install LE-0 wheel only for MODE=le0
 if [ "$MODE" = "le0" ]; then
+    log "Installing LE-0 wheel: $LE0_WHEEL"
     pip install --quiet "$LE0_WHEEL" > /dev/null 2>&1
+    log "LE-0 wheel installed"
     
     # Set LE-0 target entrypoint
     export LE0_TARGET="${LE0_TARGET:-target_vllm:run}"
@@ -58,12 +71,18 @@ if [ "$MODE" = "le0" ]; then
 fi
 
 # Expand flow with fixture content
+log "Expanding flow with fixture content..."
 python3 run_flow.py flows/three_step.json flows/_expanded.json
+log "Flow expanded"
 
 # Execute based on mode
 if [ "$MODE" = "standalone" ]; then
+    log "Starting standalone execution..."
     python3 standalone_runner.py flows/_expanded.json
+    log "Standalone execution completed"
 elif [ "$MODE" = "le0" ]; then
+    log "Starting LE-0 execution..."
     "$LE0_CMD" flows/_expanded.json
+    log "LE-0 execution completed"
 fi
 
