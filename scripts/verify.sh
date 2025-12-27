@@ -15,6 +15,36 @@ done
 
 echo "[PROGRESS] Python syntax check passed"
 
+# Preflight checks (requires venv with packages installed)
+if [ -d "venv" ] && [ -f "venv/bin/python" ]; then
+    echo "[PROGRESS] Running preflight checks..."
+    
+    # Standalone preflight
+    if MODE=standalone ./venv/bin/python scripts/preflight.py 2>&1; then
+        echo "[PROGRESS] Standalone preflight passed"
+    else
+        echo "ERROR: Standalone preflight failed" >&2
+        exit 1
+    fi
+    
+    # LE-0 preflight (if wheel available)
+    if [ -n "${LE0_WHEEL:-}" ] && [ -f "$LE0_WHEEL" ]; then
+        # Ensure wheel is installed in venv for preflight check
+        ./venv/bin/pip install --quiet --force-reinstall "$LE0_WHEEL" > /dev/null 2>&1 || true
+        
+        if MODE=le0 LE0_WHEEL="$LE0_WHEEL" LE0_TARGET=target_vllm:run ./venv/bin/python scripts/preflight.py 2>&1; then
+            echo "[PROGRESS] LE-0 preflight passed"
+        else
+            echo "ERROR: LE-0 preflight failed" >&2
+            exit 1
+        fi
+    else
+        echo "[PROGRESS] LE0_WHEEL not set, skipping LE-0 preflight"
+    fi
+else
+    echo "[PROGRESS] venv not found, skipping preflight checks (run 'bash run.sh' first to create venv)"
+fi
+
 # Standalone smoke test
 echo "[PROGRESS] Running standalone smoke test with NUM_FLOWS=1..."
 if NUM_FLOWS=1 MODE=standalone bash run.sh > /tmp/standalone_stdout.log 2> /tmp/standalone_stderr.log; then

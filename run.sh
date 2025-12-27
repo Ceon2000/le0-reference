@@ -93,6 +93,13 @@ if [ "$MODE" = "le0" ] || [ "$MODE" = "both" ]; then
     LE0_CMD="./venv/bin/le0"
 fi
 
+# Run preflight verifier
+log "Running preflight checks..."
+if ! ./venv/bin/python scripts/preflight.py; then
+    log "Preflight checks failed. Aborting." >&2
+    exit 1
+fi
+
 # Helper function to capture metrics from stderr
 capture_metrics() {
     local output_file="$1"
