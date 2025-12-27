@@ -1,0 +1,28 @@
+[
+  "Analyze the scoring logic in the codebase. Identify how different ticket attributes contribute to priority scores and verify the normalization calculations are correct.",
+  "Review the routing rules implementation. Examine how tickets are assigned to different queues based on category, priority, and other factors.",
+  "Evaluate the validation coverage across the codebase. Check which input fields are validated and identify any missing validation checks.",
+  "Investigate configuration precedence handling. Determine how environment variables, config files, and default values interact when settings conflict.",
+  "Examine the storage layer behavior. Analyze how data persistence works across different storage backends and identify potential consistency issues.",
+  "Assess test coverage gaps. Review the test suite and identify areas where critical functionality lacks adequate test coverage.",
+  "Verify documentation accuracy. Compare the documented API behavior with the actual implementation to find discrepancies.",
+  "Analyze edge case handling. Identify scenarios where the system might fail or behave unexpectedly under unusual input conditions.",
+  "Review refactoring opportunities. Examine code duplication, complexity hotspots, and areas that would benefit from structural improvements.",
+  "Evaluate error handling patterns. Check how exceptions are caught, logged, and propagated throughout the system.",
+  "Examine data model relationships. Verify that entity relationships are correctly defined and enforced across the codebase.",
+  "Analyze performance bottlenecks. Identify operations that might become slow under high load or with large datasets.",
+  "Review security considerations. Check for potential vulnerabilities in input handling, authentication, and authorization logic.",
+  "Examine logging and observability. Evaluate how system events are tracked and whether sufficient context is captured for debugging.",
+  "Assess code maintainability. Evaluate naming conventions, code organization, and adherence to established patterns.",
+  "Review integration points. Examine how different modules interact and identify potential coupling issues.",
+  "Analyze resource management. Check for proper cleanup of connections, file handles, and other system resources.",
+  "Evaluate concurrency handling. Examine how the system handles concurrent requests and potential race conditions.",
+  "Review data transformation logic. Verify that data conversions and normalizations preserve correctness across different formats.",
+  "Examine dependency management. Check for outdated dependencies, version conflicts, and potential security vulnerabilities.",
+  "Analyze business logic correctness. Verify that core algorithms implement the intended behavior without off-by-one errors or logic flaws.",
+  "Review API contract compliance. Ensure that public interfaces match their documented specifications and handle edge cases gracefully.",
+  "Examine state management. Analyze how application state is maintained and identify potential inconsistencies or race conditions.",
+  "Evaluate scalability considerations. Identify components that might not scale well as usage increases or data volumes grow.",
+  "Review code quality metrics. Assess complexity, testability, and adherence to best practices across different modules."
+]
+

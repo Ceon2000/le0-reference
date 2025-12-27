@@ -8,6 +8,10 @@ log() {
     fi
 }
 
+# Parse NUM_FLOWS (defaults to 25, clamped to 1-25)
+NUM_FLOWS="${NUM_FLOWS:-25}"
+NUM_FLOWS=$((NUM_FLOWS < 1 ? 1 : (NUM_FLOWS > 25 ? 25 : NUM_FLOWS)))
+
 # Parse MODE (defaults to le0)
 MODE="${MODE:-le0}"
 if [ "$MODE" != "standalone" ] && [ "$MODE" != "le0" ] && [ "$MODE" != "both" ]; then
@@ -96,22 +100,33 @@ fi
 # Helper function to run standalone mode
 run_standalone() {
     echo "vLLM Standalone"
-    log "Expanding flow with fixture content..."
-    python3 run_flow.py flows/three_step.json flows/_expanded.json
-    log "Flow expanded"
-    log "Starting standalone execution..."
-    python3 standalone_runner.py flows/_expanded.json
+    log "Generating $NUM_FLOWS expanded flows from prompt suite..."
+    python3 run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS"
+    log "Flows generated"
+    log "Starting standalone execution ($NUM_FLOWS workflows)..."
+    NUM_FLOWS="$NUM_FLOWS" python3 standalone_runner.py
     log "Standalone execution completed"
 }
 
 # Helper function to run LE-0 mode
 run_le0() {
     echo "vLLM+LE-0"
-    log "Expanding flow with fixture content..."
-    python3 run_flow.py flows/three_step.json flows/_expanded.json
-    log "Flow expanded"
-    log "Starting LE-0 execution..."
-    "$LE0_CMD" flows/_expanded.json
+    log "Generating $NUM_FLOWS expanded flows from prompt suite..."
+    python3 run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS"
+    log "Flows generated"
+    log "Starting LE-0 execution ($NUM_FLOWS workflows)..."
+    
+    # Execute each workflow sequentially
+    for i in $(seq 1 "$NUM_FLOWS"); do
+        flow_file=$(printf "flows/_expanded_%02d.json" "$i")
+        if [ -f "$flow_file" ]; then
+            log "Executing workflow $i/$NUM_FLOWS..."
+            "$LE0_CMD" "$flow_file"
+        else
+            log "Warning: Flow file $flow_file not found, skipping" >&2
+        fi
+    done
+    
     log "LE-0 execution completed"
 }
 

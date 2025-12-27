@@ -22,34 +22,39 @@ Once you have the LE-0 wheel file, set `LE0_WHEEL` to its path.
 
 ```bash
 # vLLM Standalone (no LE-0 wheel required)
-MODE=standalone bash run.sh
+NUM_FLOWS=25 MODE=standalone bash run.sh
 
 # vLLM+LE-0 (requires LE0_WHEEL)
-MODE=le0 LE0_WHEEL=dist/<le0_wheel>.whl bash run.sh
+NUM_FLOWS=25 LE0_WHEEL=dist/<le0_wheel>.whl MODE=le0 bash run.sh
 
 # Both comparisons sequentially (requires LE0_WHEEL)
-MODE=both LE0_WHEEL=dist/<le0_wheel>.whl bash run.sh
+NUM_FLOWS=25 LE0_WHEEL=dist/<le0_wheel>.whl MODE=both bash run.sh
 ```
 
 If `MODE` is not specified, it defaults to `le0`. `MODE=both` runs vLLM Standalone followed by vLLM+LE-0 for side-by-side comparison.
+
+**Note:** `NUM_FLOWS` (default: 25, max: 25) controls how many workflows are executed from the multi-task benchmark suite. Each workflow uses a different prompt that focuses on a distinct analysis task over the same codebase.
 
 The standalone mode establishes baseline per-step latency and token counts; the LE-0 mode demonstrates bounded reuse across steps using the same workflow.
 
 ## Expected Output
 
-The script executes 3 steps (planner/executor/verifier) and prints:
+The script executes `NUM_FLOWS` workflows (default 25), each with 3 steps (planner/executor/verifier), and prints:
 
 - Banner: `vLLM Standalone` or `vLLM+LE-0`
 - One `[INPUT]` line: `fixture_bytes=... fixture_files=...`
-- Three `[TARGET]` lines: `step=... latency_ms=... prompt_tokens=... decode_tokens=... local_out_hash=...`
+- For each workflow: Three `[TARGET]` lines: `step=... latency_ms=... prompt_tokens=... decode_tokens=... local_out_hash=...`
 - In `MODE=le0`, LE-0 prints additional per-step hash lines
 
 **No model output text is printed** (IP-safe: hashes and metrics only). Correctness is verified via step execution completion and stable per-step output hashes; performance characteristics are reflected in latency and token counts.
+
+Each workflow uses a different prompt from the benchmark suite, focusing on distinct analysis tasks over the same codebase.
 
 ## Environment Variables
 
 - `LE0_WHEEL` (required for MODE=le0 and MODE=both): Path to LE-0 wheel file
 - `MODE` (optional): `standalone`, `le0`, or `both`, defaults to `le0`
+- `NUM_FLOWS` (optional): Number of workflows to execute (1-25), defaults to 25
 - `MODEL` (optional): Model ID, defaults to `allenai/Olmo-3-7B-Think`
 - `QUIET` (optional): Set to `1` to suppress `[PROGRESS]` messages
 
@@ -57,9 +62,10 @@ The script executes 3 steps (planner/executor/verifier) and prints:
 
 - `target_vllm.py`: vLLM wrapper implementing the target interface
 - `fixture_loader.py`: Loads fixture codebase from `fixtures/helpdesk_ai/`
-- `run_flow.py`: Expands flow JSON with fixture content
-- `standalone_runner.py`: Direct step execution for MODE=standalone
+- `run_flow.py`: Expands flow JSON with prompts from suite and fixture content
+- `standalone_runner.py`: Sequential workflow execution for MODE=standalone
 - `run.sh`: Setup and execution script
 - `flows/three_step.json`: Flow definition with three steps
+- `flows/prompt_suite.json`: Multi-task benchmark prompt suite
 
 **Non-goals:** This reference does not measure throughput, batching efficiency, or cross-node behavior.
