@@ -63,7 +63,7 @@ The script executes `NUM_FLOWS` workflows (default 25), each with 3 steps (plann
 - For each workflow: Three `[TARGET]` lines: `step=... latency_ms=... prompt_tokens=... decode_tokens=... local_out_hash=...`
 - In `MODE=le0`, LE-0 prints additional per-step hash lines
 
-**No model output text is printed** (IP-safe: hashes and metrics only). Correctness is verified via step execution completion and stable per-step output hashes; performance characteristics are reflected in latency and token counts.
+**No model output text is printed** (IP-safe: hash-only stdout, no prompts or raw model output). LE-0 stdout contains only hash lines. Metrics are printed to stderr with `[TARGET]` prefix. Correctness is verified via step execution completion and stable per-step output hashes; performance characteristics are reflected in latency and token counts.
 
 Each workflow uses a different prompt from the benchmark suite, focusing on distinct analysis tasks over the same codebase.
 
@@ -74,6 +74,8 @@ Each workflow uses a different prompt from the benchmark suite, focusing on dist
 - `NUM_FLOWS` (optional): Number of workflows to execute (1-25), defaults to 25
 - `MODEL` (optional): Model ID, defaults to `allenai/Olmo-3-7B-Think`
 - `QUIET` (optional): Set to `1` to suppress `[PROGRESS]` messages
+- `LE0_TARGET` (required for MODE=le0): Target function, defaults to `target_vllm:run`. This is the only LE-0 requirement.
+- `LE0_REF_FLOWS_DIR` (reference-only): Directory containing expanded flow files, defaults to `flows`. Used by the target to load flow content.
 
 ## What's in this repo
 

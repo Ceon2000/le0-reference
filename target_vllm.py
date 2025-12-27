@@ -9,6 +9,8 @@ import sys
 import time
 import hashlib
 import logging
+import json
+from pathlib import Path
 from typing import Optional, Dict, Any
 
 # Suppress vLLM and torch internal logs before importing
@@ -35,10 +37,72 @@ except ImportError:
 _llm: Optional[LLM] = None
 _model_id: Optional[str] = None
 
+# Flow tracking for LE-0 mode
+_flow_idx: int = 0
+_step_sequence: list = []  # Track step names in order: ["planner", "executor", "verifier", ...]
+_flows_dir: Optional[Path] = None
+_flows_cache: Dict[int, Dict] = {}
+
 
 def _get_model_id() -> str:
     """Get model ID from environment or default."""
     return os.environ.get("MODEL", "allenai/Olmo-3-7B-Think")
+
+
+def _get_flows_dir() -> Path:
+    """Get flows directory from environment or default."""
+    flows_dir = os.environ.get("LE0_REF_FLOWS_DIR", "flows")
+    return Path(flows_dir)
+
+
+def _load_flow(flow_idx: int) -> Dict:
+    """Load a flow file by index."""
+    global _flows_cache, _flows_dir
+    
+    if flow_idx in _flows_cache:
+        return _flows_cache[flow_idx]
+    
+    if _flows_dir is None:
+        _flows_dir = _get_flows_dir()
+    
+    flow_file = _flows_dir / f"_expanded_{flow_idx:02d}.json"
+    
+    if not flow_file.exists():
+        raise FileNotFoundError(f"Flow file not found: {flow_file}")
+    
+    with open(flow_file, "r") as f:
+        flow = json.load(f)
+    
+    _flows_cache[flow_idx] = flow
+    return flow
+
+
+def _get_current_flow_idx() -> int:
+    """Determine current flow index based on step sequence."""
+    global _step_sequence
+    
+    # Expected step sequence: planner, executor, verifier (repeats for each flow)
+    # Count how many complete cycles (planner->executor->verifier) we've seen
+    
+    if not _step_sequence:
+        return 0
+    
+    # Count complete cycles by looking for "verifier" steps
+    # Each "verifier" marks the end of a flow
+    complete_flows = 0
+    for i, step in enumerate(_step_sequence):
+        if step == "verifier":
+            complete_flows += 1
+    
+    # Current flow index (0-indexed)
+    # If the last step was "verifier", we've completed that flow, so next call is next flow
+    # Otherwise, we're still in the current flow
+    if _step_sequence[-1] == "verifier":
+        # Just completed a flow, next step will be in the next flow
+        return complete_flows
+    else:
+        # Currently in a flow (planner or executor)
+        return complete_flows
 
 
 def _ensure_model_loaded():
@@ -72,17 +136,15 @@ def _count_tokens(text: str) -> int:
         return len(text.split())
 
 
-def run(step_name: str, **kwargs) -> bytes:
+def run_prompt(prompt: str, step_name: str, max_tokens: int = 1024, temperature: float = 0.7) -> bytes:
     """
-    Run a single LE-0 step through vLLM.
+    Run vLLM generation with an explicit prompt (for standalone mode).
     
     Args:
-        step_name: Name of the step (e.g., "planner", "executor", "verifier")
-        **kwargs: Additional arguments from LE-0. Expected keys:
-            - prompt_prefix: Optional shared prefix
-            - role: Role description
-            - instruction: Step instruction
-            - input: Input text for this step
+        prompt: Full prompt text
+        step_name: Name of the step
+        max_tokens: Maximum tokens to generate
+        temperature: Sampling temperature
     
     Returns:
         bytes: Raw model output as bytes
@@ -91,22 +153,109 @@ def run(step_name: str, **kwargs) -> bytes:
     
     _ensure_model_loaded()
     
-    # Extract prompt components from kwargs (tolerant to missing keys)
-    prompt_prefix = kwargs.get("prompt_prefix", "")
-    role = kwargs.get("role", "")
-    instruction = kwargs.get("instruction", "")
-    input_text = kwargs.get("input", "")
+    # Record start time for latency measurement
+    start_time = time.time()
     
-    # Build prompt from components
+    # Run vLLM generation
+    try:
+        sampling_params = SamplingParams(
+            temperature=temperature,
+            max_tokens=max_tokens,
+            top_p=0.9,
+        )
+        
+        outputs = _llm.generate([prompt], sampling_params)
+        
+        # Extract generated text and token counts
+        if outputs and outputs[0].outputs:
+            output = outputs[0].outputs[0]
+            generated_text = output.text
+            
+            # Get decode tokens from output metadata
+            decode_tokens = getattr(output, 'token_ids', None)
+            if decode_tokens is not None and isinstance(decode_tokens, list):
+                decode_tokens = len(decode_tokens)
+            else:
+                # Fallback: count tokens using tokenizer
+                decode_tokens = _count_tokens(generated_text)
+        else:
+            generated_text = ""
+            decode_tokens = 0
+        
+        # Calculate latency
+        latency_ms = (time.time() - start_time) * 1000
+        
+        # Count prompt tokens using tokenizer
+        prompt_tokens = _count_tokens(prompt)
+        
+        # Convert to bytes
+        output_bytes = generated_text.encode('utf-8')
+        
+        # Print metrics to stderr (IP-safe: no text output)
+        print(
+            f"[TARGET] flow=0 step={step_name} latency_ms={latency_ms:.2f} "
+            f"prompt_tokens={prompt_tokens} decode_tokens={decode_tokens}",
+            file=sys.stderr
+        )
+        
+        return output_bytes
+        
+    except Exception as e:
+        print(f"[TARGET] ERROR: Generation failed for step '{step_name}': {e}", file=sys.stderr)
+        raise
+
+
+def run(step_name: str, **kwargs) -> bytes:
+    """
+    Run a single LE-0 step through vLLM.
+    This function is called by LE-0 and must track flow/step indices internally.
+    
+    Args:
+        step_name: Name of the step (e.g., "planner", "executor", "verifier")
+        **kwargs: Additional arguments from LE-0 (may be empty)
+    
+    Returns:
+        bytes: Raw model output as bytes
+    """
+    global _llm, _flow_idx, _step_sequence
+    
+    _ensure_model_loaded()
+    
+    # Determine current flow index based on step sequence BEFORE appending current step
+    # Each flow has 3 steps: planner, executor, verifier
+    current_flow_idx = _get_current_flow_idx()
+    
+    # Track step sequence for next call
+    _step_sequence.append(step_name)
+    
+    # Load flow for current flow_idx (1-indexed flow files)
+    flow = _load_flow(current_flow_idx + 1)
+    
+    # Get flow input
+    flow_input = flow.get("input", "")
+    
+    # Get steps
+    steps = flow.get("steps", [])
+    
+    # Find the step by name
+    step = None
+    for s in steps:
+        if s.get("name") == step_name:
+            step = s
+            break
+    
+    if step is None:
+        raise ValueError(f"Step '{step_name}' not found in flow {current_flow_idx + 1}")
+    
+    # Get step instruction
+    instruction = step.get("instruction", "")
+    
+    # Build prompt: instruction + input
     prompt_parts = []
-    if prompt_prefix:
-        prompt_parts.append(prompt_prefix)
-    if role:
-        prompt_parts.append(f"Role: {role}")
     if instruction:
         prompt_parts.append(f"Instruction: {instruction}")
-    if input_text:
-        prompt_parts.append(f"Input: {input_text}")
+    if flow_input:
+        prompt_parts.append(f"Input: {flow_input}")
     
     prompt = "\n\n".join(prompt_parts) if prompt_parts else ""
     
@@ -129,7 +278,6 @@ def run(step_name: str, **kwargs) -> bytes:
             generated_text = output.text
             
             # Get decode tokens from output metadata
-            # vLLM's CompletionOutput has token_ids attribute
             decode_tokens = getattr(output, 'token_ids', None)
             if decode_tokens is not None and isinstance(decode_tokens, list):
                 decode_tokens = len(decode_tokens)
@@ -149,14 +297,11 @@ def run(step_name: str, **kwargs) -> bytes:
         # Convert to bytes
         output_bytes = generated_text.encode('utf-8')
         
-        # Calculate hash
-        output_hash = hashlib.sha256(output_bytes).hexdigest()[:8]
-        
-        # Print metrics to stdout (IP-safe: no text output)
+        # Print metrics to stderr (IP-safe: no text output)
         print(
-            f"[TARGET] step={step_name} latency_ms={latency_ms:.2f} "
-            f"prompt_tokens={prompt_tokens} decode_tokens={decode_tokens} "
-            f"local_out_hash={output_hash}"
+            f"[TARGET] flow={current_flow_idx + 1} step={step_name} latency_ms={latency_ms:.2f} "
+            f"prompt_tokens={prompt_tokens} decode_tokens={decode_tokens}",
+            file=sys.stderr
         )
         
         return output_bytes
@@ -170,15 +315,11 @@ if __name__ == "__main__":
     # Smoke test when run directly
     print("[TARGET] Running smoke test...", file=sys.stderr)
     try:
-        result = run(
-            "test_step",
-            prompt_prefix="Test prefix",
-            role="Test role",
-            instruction="Say hello",
-            input="test input"
+        result = run_prompt(
+            "Instruction: Say hello\n\nInput: test input",
+            "test_step"
         )
         print(f"[TARGET] Smoke test passed. Output length: {len(result)} bytes", file=sys.stderr)
     except Exception as e:
         print(f"[TARGET] Smoke test failed: {e}", file=sys.stderr)
         sys.exit(1)
-

@@ -6,15 +6,17 @@ Standalone runner that executes multiple workflows sequentially.
 import json
 import os
 import sys
-from target_vllm import run
+from pathlib import Path
+from target_vllm import run_prompt
 
 
-def execute_one_workflow(flow_file: str) -> None:
+def execute_one_workflow(flow_file: str, flow_idx: int) -> None:
     """
-    Execute a single workflow using target_vllm.run.
+    Execute a single workflow using target_vllm.run_prompt.
     
     Args:
         flow_file: Path to expanded flow JSON file
+        flow_idx: Flow index (1-based)
     """
     # Load flow
     with open(flow_file, "r") as f:
@@ -31,16 +33,17 @@ def execute_one_workflow(flow_file: str) -> None:
         step_name = step.get("name", "unknown")
         instruction = step.get("instruction", "")
         
-        # Call target_vllm.run with consistent kwargs shape
-        kwargs = {
-            "instruction": instruction,
-            "input": flow_input,
-            "max_tokens": 1024,
-            "temperature": 0.7,
-        }
+        # Build prompt: instruction + input
+        prompt_parts = []
+        if instruction:
+            prompt_parts.append(f"Instruction: {instruction}")
+        if flow_input:
+            prompt_parts.append(f"Input: {flow_input}")
         
-        # Run step (target_vllm handles printing)
-        run(step_name, **kwargs)
+        prompt = "\n\n".join(prompt_parts) if prompt_parts else ""
+        
+        # Call run_prompt (standalone path)
+        run_prompt(prompt, step_name, max_tokens=1024, temperature=0.7)
 
 
 def execute_standalone(num_flows: int = 25) -> None:
@@ -59,10 +62,9 @@ def execute_standalone(num_flows: int = 25) -> None:
             print(f"[PROGRESS] Warning: Flow file {flow_file} not found, skipping", file=sys.stderr)
             continue
         
-        execute_one_workflow(flow_file)
+        execute_one_workflow(flow_file, i)
 
 
 if __name__ == "__main__":
     num_flows = int(os.environ.get("NUM_FLOWS", "25"))
     execute_standalone(num_flows)
-
