@@ -12,7 +12,7 @@ This repository provides a runnable reference example that compares vLLM standal
 
 To run this example, you must first request access to the LE-0 runtime.
 
-[Request LE-0 runtime access here] (you will receive a wheel file for local installation)
+[Request LE-0 runtime access here](https://www.clclabs.ai/le-0) (you will receive a wheel file for local installation)
 
 Once you have the LE-0 wheel file, set `LE0_WHEEL` to its path.
 
