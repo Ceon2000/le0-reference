@@ -1,17 +1,17 @@
 {
-  "input": "Solve the problem: What is 2 + 2?",
+  "input": "Review the codebase in fixtures/helpdesk_ai/ and identify any bugs or issues. The complete codebase will be provided in the expanded input.",
   "steps": [
     {
       "name": "planner",
-      "instruction": "Plan the approach to solve this problem step by step."
+      "instruction": "Analyze the codebase structure and plan an approach to identify bugs and issues."
     },
     {
       "name": "executor",
-      "instruction": "Execute the planned steps to solve the problem."
+      "instruction": "Execute the analysis plan and identify specific bugs or issues in the codebase."
     },
     {
       "name": "verifier",
-      "instruction": "Verify the solution is correct and provide final answer."
+      "instruction": "Verify the identified issues are valid bugs and provide a summary of findings."
     }
   ]
 }

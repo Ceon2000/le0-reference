@@ -16,8 +16,8 @@ except ImportError:
     print("[TARGET] ERROR: vLLM not installed. Install with: pip install vllm", file=sys.stderr)
     sys.exit(1)
 
-# Global cached model and tokenizer
-_cached_llm: Optional[LLM] = None
+# Global model and tokenizer (loaded once, reused across steps)
+_llm: Optional[LLM] = None
 _model_id: Optional[str] = None
 
 
@@ -27,17 +27,15 @@ def _get_model_id() -> str:
 
 
 def _ensure_model_loaded():
-    """Ensure the vLLM model is loaded and cached."""
-    global _cached_llm, _model_id
+    """Ensure the vLLM model is loaded."""
+    global _llm, _model_id
     
     current_model_id = _get_model_id()
     
-    if _cached_llm is None or _model_id != current_model_id:
+    if _llm is None or _model_id != current_model_id:
         try:
-            print(f"[TARGET] Loading model: {current_model_id}", file=sys.stderr)
-            _cached_llm = LLM(model=current_model_id, trust_remote_code=True)
+            _llm = LLM(model=current_model_id, trust_remote_code=True)
             _model_id = current_model_id
-            print(f"[TARGET] Model loaded successfully", file=sys.stderr)
         except Exception as e:
             print(f"[TARGET] ERROR: Failed to load model '{current_model_id}': {e}", file=sys.stderr)
             raise
@@ -45,12 +43,12 @@ def _ensure_model_loaded():
 
 def _count_tokens(text: str) -> int:
     """Count tokens using the model's tokenizer."""
-    global _cached_llm
-    if _cached_llm is None:
+    global _llm
+    if _llm is None:
         return len(text.split())  # Fallback approximation
     try:
         # Access the tokenizer through the LLM engine
-        tokenizer = _cached_llm.llm_engine.tokenizer.tokenizer
+        tokenizer = _llm.llm_engine.tokenizer.tokenizer
         return len(tokenizer.encode(text))
     except Exception:
         # Fallback to word count approximation
@@ -72,7 +70,7 @@ def run(step_name: str, **kwargs) -> bytes:
     Returns:
         bytes: Raw model output as bytes
     """
-    global _cached_llm
+    global _llm
     
     _ensure_model_loaded()
     
@@ -102,11 +100,11 @@ def run(step_name: str, **kwargs) -> bytes:
     try:
         sampling_params = SamplingParams(
             temperature=kwargs.get("temperature", 0.7),
-            max_tokens=kwargs.get("max_tokens", 1024),
+            max_tokens=kwargs.get("max_tokens", kwargs.get("max_new_tokens", 1024)),
             top_p=kwargs.get("top_p", 0.9),
         )
         
-        outputs = _cached_llm.generate([prompt], sampling_params)
+        outputs = _llm.generate([prompt], sampling_params)
         
         # Extract generated text and token counts
         if outputs and outputs[0].outputs:
@@ -141,7 +139,7 @@ def run(step_name: str, **kwargs) -> bytes:
         print(
             f"[TARGET] step={step_name} latency_ms={latency_ms:.2f} "
             f"prompt_tokens={prompt_tokens} decode_tokens={decode_tokens} "
-            f"output_hash={output_hash}",
+            f"local_out_hash={output_hash}",
             file=sys.stderr
         )
         
