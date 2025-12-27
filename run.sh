@@ -72,7 +72,7 @@ log "Virtual environment activated"
 if [ "${QUIET:-0}" != "1" ]; then
     echo "[PROGRESS] Installing python deps (this may take a few minutes)" >&2
 fi
-pip install $PIP_QUIET_FLAG -r requirements.txt
+./venv/bin/pip install $PIP_QUIET_FLAG -r requirements.txt
 log "Requirements installed"
 
 # Install LE-0 wheel for modes that need it
@@ -80,31 +80,19 @@ if [ "$MODE" = "le0" ] || [ "$MODE" = "both" ]; then
     if [ "${QUIET:-0}" != "1" ]; then
         echo "[PROGRESS] Installing LE-0 wheel (this may take a few minutes)" >&2
     fi
-    pip install $PIP_QUIET_FLAG "$LE0_WHEEL"
+    ./venv/bin/pip install $PIP_QUIET_FLAG "$LE0_WHEEL"
     log "LE-0 wheel installed"
     
     # Set LE-0 target entrypoint
     export LE0_TARGET="${LE0_TARGET:-target_vllm:run}"
     
-    # Determine LE-0 CLI entrypoint
-    LE0_CMD=""
-    if command -v le0 &> /dev/null; then
-        LE0_CMD="le0"
-    elif command -v le0-runtime &> /dev/null; then
-        LE0_CMD="le0-runtime"
-    elif python -m le0 --help &> /dev/null 2>&1; then
-        LE0_CMD="python -m le0"
-    else
-        echo "ERROR: Could not find LE-0 CLI entrypoint." >&2
-        echo "Tried: le0, le0-runtime, python -m le0" >&2
-        echo "Please ensure LE-0 wheel is correctly installed." >&2
-        exit 1
-    fi
+    # Use venv binary for LE-0
+    LE0_CMD="./venv/bin/le0"
     
     # Detect LE-0 flow flag by parsing help output
     LE0_HELP=$("$LE0_CMD" -h 2>&1 || "$LE0_CMD" --help 2>&1)
     LE0_FLOW_FLAG=""
-    for flag in --flow --workflow --workflow_path --spec --config; do
+    for flag in --flow --flows --flow_file --flow-path --file; do
         if echo "$LE0_HELP" | grep -q -- "$flag"; then
             LE0_FLOW_FLAG="$flag"
             break
@@ -126,7 +114,7 @@ fi
 # Helper function to capture metrics from stdout
 capture_metrics() {
     local output_file="$1"
-    python3 - "$output_file" <<'PYTHON_SCRIPT'
+    ./venv/bin/python - "$output_file" <<'PYTHON_SCRIPT'
 import re
 import sys
 
@@ -158,7 +146,7 @@ PYTHON_SCRIPT
 run_standalone() {
     echo "vLLM Standalone"
     log "Generating $NUM_FLOWS expanded flows from prompt suite..."
-    python3 run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS"
+    ./venv/bin/python run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS"
     log "Flows generated"
     log "Starting standalone execution ($NUM_FLOWS workflows)..."
     
@@ -167,7 +155,7 @@ run_standalone() {
     trap "rm -f $temp_output" EXIT
     
     # Capture stdout (stderr goes to terminal naturally)
-    if NUM_FLOWS="$NUM_FLOWS" python3 standalone_runner.py | tee "$temp_output"; then
+    if NUM_FLOWS="$NUM_FLOWS" ./venv/bin/python standalone_runner.py | tee "$temp_output"; then
         log "Standalone execution completed"
     else
         local exit_code=$?
@@ -203,7 +191,7 @@ run_le0() {
     else
         # LE-0 accepts flow files - generate and use them
         log "Generating $NUM_FLOWS expanded flows from prompt suite..."
-        python3 run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS"
+        ./venv/bin/python run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS"
         log "Flows generated"
         log "Starting LE-0 execution ($NUM_FLOWS workflows)..."
         
@@ -284,7 +272,7 @@ elif [ "$MODE" = "both" ]; then
             
             # Calculate deltas if both metrics available
             if [ -n "$STANDALONE_METRICS" ]; then
-                delta_result=$(python3 -c "print(int($standalone_prompt) - int($le0_prompt), float($standalone_latency) - float($le0_latency))")
+                delta_result=$(./venv/bin/python -c "print(int($standalone_prompt) - int($le0_prompt), float($standalone_latency) - float($le0_latency))")
                 read -r prompt_delta latency_delta <<< "$delta_result"
                 log "DELTA: prompt_tokens_total=$prompt_delta latency_ms_total=${latency_delta%.*}"
             fi
@@ -295,4 +283,3 @@ elif [ "$MODE" = "both" ]; then
         log "SUMMARY vLLM+LE-0: unavailable (LE-0 does not run wrapper target in this version)"
     fi
 fi
-
