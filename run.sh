@@ -105,7 +105,7 @@ if [ "$MODE" = "le0" ] || [ "$MODE" = "both" ]; then
     LE0_HELP=$("$LE0_CMD" -h 2>&1 || "$LE0_CMD" --help 2>&1)
     LE0_FLOW_FLAG=""
     for flag in --flow --workflow --workflow_path --spec --config; do
-        if echo "$LE0_HELP" | grep -q "$flag"; then
+        if echo "$LE0_HELP" | grep -q -- "$flag"; then
             LE0_FLOW_FLAG="$flag"
             break
         fi
@@ -117,10 +117,9 @@ if [ "$MODE" = "le0" ] || [ "$MODE" = "both" ]; then
         LE0_SUPPORTS_NUM_FLOWS=1
     fi
     
+    # If no flow flag found, LE-0 uses built-in evaluation flow
     if [ -z "$LE0_FLOW_FLAG" ]; then
-        echo "[PROGRESS] LE-0 CLI does not accept a flow file flag; update wrapper to match this LE-0 version." >&2
-        echo "$LE0_HELP" >&2
-        exit 1
+        log "LE-0 uses its built-in evaluation flow (this wheel does not accept a flow file)."
     fi
 fi
 
@@ -185,47 +184,62 @@ run_standalone() {
 # Helper function to run LE-0 mode
 run_le0() {
     echo "vLLM+LE-0"
-    log "Generating $NUM_FLOWS expanded flows from prompt suite..."
-    python3 run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS"
-    log "Flows generated"
-    log "Starting LE-0 execution ($NUM_FLOWS workflows)..."
     
     # Capture stdout to temp file for metrics, but also display it
     local temp_output=$(mktemp)
     trap "rm -f $temp_output" EXIT
     
-    # Check if LE-0 supports --num_flows with a single flow file
-    if [ "$LE0_SUPPORTS_NUM_FLOWS" = "1" ] && [ "$NUM_FLOWS" -gt 1 ]; then
-        # Try using --num_flows with first flow file
-        local first_flow=$(printf "flows/_expanded_%02d.json" "1")
-        if [ -f "$first_flow" ]; then
-            log "Executing all workflows via --num_flows..."
-            if "$LE0_CMD" "$LE0_FLOW_FLAG" "$first_flow" --num_flows "$NUM_FLOWS" | tee "$temp_output"; then
-                log "LE-0 execution completed"
-            else
-                log "LE-0 --num_flows failed, falling back to per-workflow loop" >&2
-                rm -f "$temp_output"
-                temp_output=$(mktemp)
-                # Fall through to loop
+    # Check if LE-0 accepts flow files
+    if [ -z "$LE0_FLOW_FLAG" ]; then
+        # LE-0 uses built-in evaluation flow, no flow file needed
+        log "Starting LE-0 execution with built-in flow ($NUM_FLOWS workflows)..."
+        if [ "$LE0_SUPPORTS_NUM_FLOWS" = "1" ]; then
+            "$LE0_CMD" --num_flows "$NUM_FLOWS" | tee "$temp_output"
+        else
+            # If --num_flows not supported, run once (LE-0 handles internally)
+            "$LE0_CMD" | tee "$temp_output"
+        fi
+        log "LE-0 execution completed"
+    else
+        # LE-0 accepts flow files - generate and use them
+        log "Generating $NUM_FLOWS expanded flows from prompt suite..."
+        python3 run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS"
+        log "Flows generated"
+        log "Starting LE-0 execution ($NUM_FLOWS workflows)..."
+        
+        # Check if LE-0 supports --num_flows with a single flow file
+        if [ "$LE0_SUPPORTS_NUM_FLOWS" = "1" ] && [ "$NUM_FLOWS" -gt 1 ]; then
+            # Try using --num_flows with first flow file
+            local first_flow=$(printf "flows/_expanded_%02d.json" "1")
+            if [ -f "$first_flow" ]; then
+                log "Executing all workflows via --num_flows..."
+                if "$LE0_CMD" "$LE0_FLOW_FLAG" "$first_flow" --num_flows "$NUM_FLOWS" | tee "$temp_output"; then
+                    log "LE-0 execution completed"
+                else
+                    log "LE-0 --num_flows failed, falling back to per-workflow loop" >&2
+                    rm -f "$temp_output"
+                    temp_output=$(mktemp)
+                    # Fall through to loop
+                fi
             fi
+        fi
+        
+        # If --num_flows didn't work or wasn't supported, loop through workflows
+        if [ ! -s "$temp_output" ]; then
+            for i in $(seq 1 "$NUM_FLOWS"); do
+                flow_file=$(printf "flows/_expanded_%02d.json" "$i")
+                if [ -f "$flow_file" ]; then
+                    log "Executing workflow $i/$NUM_FLOWS..."
+                    "$LE0_CMD" "$LE0_FLOW_FLAG" "$flow_file" | tee -a "$temp_output"
+                else
+                    log "Warning: Flow file $flow_file not found, skipping" >&2
+                fi
+            done
+            log "LE-0 execution completed"
         fi
     fi
     
-    # If --num_flows didn't work or wasn't supported, loop through workflows
-    if [ ! -s "$temp_output" ]; then
-        for i in $(seq 1 "$NUM_FLOWS"); do
-            flow_file=$(printf "flows/_expanded_%02d.json" "$i")
-            if [ -f "$flow_file" ]; then
-                log "Executing workflow $i/$NUM_FLOWS..."
-                "$LE0_CMD" "$LE0_FLOW_FLAG" "$flow_file" | tee -a "$temp_output"
-            else
-                log "Warning: Flow file $flow_file not found, skipping" >&2
-            fi
-        done
-        log "LE-0 execution completed"
-    fi
-    
-    # Extract metrics
+    # Extract metrics (may be empty if LE-0 doesn't emit [TARGET] lines)
     LE0_METRICS=$(capture_metrics "$temp_output")
     rm -f "$temp_output"
 }
@@ -244,7 +258,13 @@ elif [ "$MODE" = "le0" ]; then
     run_le0
     if [ -n "$LE0_METRICS" ]; then
         read -r prompt_tokens latency_ms steps <<< "$LE0_METRICS"
-        log "SUMMARY vLLM+LE-0:       steps=$steps prompt_tokens_total=$prompt_tokens latency_ms_total=${latency_ms%.*}"
+        if [ "$steps" -gt 0 ]; then
+            log "SUMMARY vLLM+LE-0:       steps=$steps prompt_tokens_total=$prompt_tokens latency_ms_total=${latency_ms%.*}"
+        else
+            log "SUMMARY vLLM+LE-0: unavailable (LE-0 does not run wrapper target in this version)"
+        fi
+    else
+        log "SUMMARY vLLM+LE-0: unavailable (LE-0 does not run wrapper target in this version)"
     fi
 elif [ "$MODE" = "both" ]; then
     run_standalone || true  # Continue even if standalone fails
@@ -252,23 +272,27 @@ elif [ "$MODE" = "both" ]; then
     run_le0 || true  # Continue even if LE-0 fails
     
     # Print comparison summary
-    if [ -n "$STANDALONE_METRICS" ] && [ -n "$LE0_METRICS" ]; then
+    if [ -n "$STANDALONE_METRICS" ]; then
         read -r standalone_prompt standalone_latency standalone_steps <<< "$STANDALONE_METRICS"
-        read -r le0_prompt le0_latency le0_steps <<< "$LE0_METRICS"
-        
         log "SUMMARY vLLM Standalone: steps=$standalone_steps prompt_tokens_total=$standalone_prompt latency_ms_total=${standalone_latency%.*}"
-        log "SUMMARY vLLM+LE-0:       steps=$le0_steps prompt_tokens_total=$le0_prompt latency_ms_total=${le0_latency%.*}"
-        
-        # Calculate deltas using Python
-        delta_result=$(python3 -c "print(int($standalone_prompt) - int($le0_prompt), float($standalone_latency) - float($le0_latency))")
-        read -r prompt_delta latency_delta <<< "$delta_result"
-        log "DELTA: prompt_tokens_total=$prompt_delta latency_ms_total=${latency_delta%.*}"
-    elif [ -n "$STANDALONE_METRICS" ]; then
-        read -r prompt_tokens latency_ms steps <<< "$STANDALONE_METRICS"
-        log "SUMMARY vLLM Standalone: steps=$steps prompt_tokens_total=$prompt_tokens latency_ms_total=${latency_ms%.*}"
-    elif [ -n "$LE0_METRICS" ]; then
-        read -r prompt_tokens latency_ms steps <<< "$LE0_METRICS"
-        log "SUMMARY vLLM+LE-0:       steps=$steps prompt_tokens_total=$prompt_tokens latency_ms_total=${latency_ms%.*}"
+    fi
+    
+    if [ -n "$LE0_METRICS" ]; then
+        read -r le0_prompt le0_latency le0_steps <<< "$LE0_METRICS"
+        if [ "$le0_steps" -gt 0 ]; then
+            log "SUMMARY vLLM+LE-0:       steps=$le0_steps prompt_tokens_total=$le0_prompt latency_ms_total=${le0_latency%.*}"
+            
+            # Calculate deltas if both metrics available
+            if [ -n "$STANDALONE_METRICS" ]; then
+                delta_result=$(python3 -c "print(int($standalone_prompt) - int($le0_prompt), float($standalone_latency) - float($le0_latency))")
+                read -r prompt_delta latency_delta <<< "$delta_result"
+                log "DELTA: prompt_tokens_total=$prompt_delta latency_ms_total=${latency_delta%.*}"
+            fi
+        else
+            log "SUMMARY vLLM+LE-0: unavailable (LE-0 does not run wrapper target in this version)"
+        fi
+    else
+        log "SUMMARY vLLM+LE-0: unavailable (LE-0 does not run wrapper target in this version)"
     fi
 fi
 
