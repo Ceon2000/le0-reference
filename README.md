@@ -18,22 +18,39 @@ Once you have the LE-0 wheel file, set `LE0_WHEEL` to its path.
 
 ## Quick Start
 
-**Prerequisites:** Python 3.8+, CUDA-capable GPU, LE-0 wheel file (for MODE=le0 only).
+**Prerequisites:** Python 3.8+, CUDA-capable GPU, LE-0 wheel file (for MODE=le0 and MODE=both).
 
+### vLLM Standalone only
 ```bash
-# vLLM Standalone (no LE-0 wheel required)
-NUM_FLOWS=25 MODE=standalone bash run.sh
-
-# vLLM+LE-0 (requires LE0_WHEEL)
-NUM_FLOWS=25 LE0_WHEEL=dist/<le0_wheel>.whl MODE=le0 bash run.sh
-
-# Both comparisons sequentially (requires LE0_WHEEL)
-NUM_FLOWS=25 LE0_WHEEL=dist/<le0_wheel>.whl MODE=both bash run.sh
+MODE=standalone bash run.sh
 ```
 
-If `MODE` is not specified, it defaults to `le0`. `MODE=both` runs vLLM Standalone followed by vLLM+LE-0 for side-by-side comparison.
+### vLLM + LE-0 only
+```bash
+LE0_WHEEL=dist/le0_runtime-0.1.3-py3-none-any.whl MODE=le0 bash run.sh
+```
 
-**Note:** `NUM_FLOWS` (default: 25, max: 25) controls how many workflows are executed from the multi-task benchmark suite. Each workflow uses a different prompt that focuses on a distinct analysis task over the same codebase.
+### One-command comparison (recommended)
+
+Runs vLLM Standalone → vLLM+LE-0 back-to-back.
+
+```bash
+LE0_WHEEL=dist/le0_runtime-0.1.3-py3-none-any.whl MODE=both bash run.sh
+```
+
+### Clean screenshots (no progress output)
+```bash
+QUIET=1 MODE=standalone bash run.sh
+QUIET=1 LE0_WHEEL=dist/le0_runtime-0.1.3-py3-none-any.whl MODE=le0 bash run.sh
+QUIET=1 LE0_WHEEL=dist/le0_runtime-0.1.3-py3-none-any.whl MODE=both bash run.sh
+```
+
+### Quick sanity check
+```bash
+ls dist/le0_runtime-0.1.3-py3-none-any.whl
+```
+
+**Note:** `NUM_FLOWS` (default: 25, max: 25) controls how many workflows are executed from the multi-task benchmark suite. Each workflow uses a different prompt that focuses on a distinct analysis task over the same codebase. If `MODE` is not specified, it defaults to `le0`.
 
 The standalone mode establishes baseline per-step latency and token counts; the LE-0 mode demonstrates bounded reuse across steps using the same workflow.
 
