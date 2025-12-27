@@ -1,58 +1,29 @@
 #!/usr/bin/env python3
 """
 vLLM target implementation for LE-0.
-Provides a cached vLLM model wrapper that accepts LE-0 step calls.
+Provides a vLLM model wrapper that accepts LE-0 step calls.
 """
 
 import os
 import sys
 import time
 import hashlib
-import threading
+import logging
 from typing import Optional, Dict, Any
 
+# Suppress vLLM and torch internal logs before importing
+logging.getLogger("vllm").setLevel(logging.ERROR)
+logging.getLogger("torch").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
+logging.getLogger("tokenizers").setLevel(logging.ERROR)
+
+# Suppress tqdm progress bars
+os.environ.setdefault("TQDM_DISABLE", "1")
 
 def _progress(msg: str) -> None:
     """Print progress message to stderr unless QUIET=1."""
     if os.environ.get("QUIET", "0") != "1":
         print(f"[PROGRESS] {msg}", file=sys.stderr)
-
-
-class Spinner:
-    """Simple spinner for long-running operations."""
-    
-    def __init__(self, message: str):
-        """Initialize spinner with message."""
-        self.message = message
-        self.stop_event = threading.Event()
-        self.spinner_thread = None
-        self.spinner_chars = "|/-\\"
-        self.spinner_idx = 0
-    
-    def _spin(self) -> None:
-        """Internal spinner loop."""
-        while not self.stop_event.is_set():
-            char = self.spinner_chars[self.spinner_idx % len(self.spinner_chars)]
-            print(f"\r[PROGRESS] {self.message} {char}", end="", file=sys.stderr, flush=True)
-            self.spinner_idx += 1
-            time.sleep(0.2)  # ~5 Hz update rate
-    
-    def start(self) -> None:
-        """Start the spinner."""
-        if os.environ.get("QUIET", "0") != "1":
-            self.spinner_thread = threading.Thread(target=self._spin, daemon=True)
-            self.spinner_thread.start()
-    
-    def stop(self, final_message: str = None) -> None:
-        """Stop the spinner and print final message."""
-        if os.environ.get("QUIET", "0") != "1":
-            self.stop_event.set()
-            if self.spinner_thread:
-                self.spinner_thread.join(timeout=0.5)
-            # Clear spinner line and print final message
-            print("\r" + " " * (len(self.message) + 20) + "\r", end="", file=sys.stderr, flush=True)
-            if final_message:
-                print(f"[PROGRESS] {final_message}", file=sys.stderr)
 
 try:
     from vllm import LLM, SamplingParams
@@ -78,15 +49,11 @@ def _ensure_model_loaded():
     
     if _llm is None or _model_id != current_model_id:
         try:
-            spinner = Spinner("loading model")
-            spinner.start()
+            _progress("loading model")
             _llm = LLM(model=current_model_id, trust_remote_code=True)
             _model_id = current_model_id
-            spinner.stop("model loaded")
+            _progress("model loaded")
         except Exception as e:
-            # Stop spinner if it's running
-            if 'spinner' in locals():
-                spinner.stop()
             print(f"[TARGET] ERROR: Failed to load model '{current_model_id}': {e}", file=sys.stderr)
             raise
 
