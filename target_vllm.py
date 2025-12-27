@@ -164,7 +164,7 @@ def run_prompt(prompt: str, step_name: str, max_tokens: int = 1024, temperature:
             top_p=0.9,
         )
         
-        outputs = _llm.generate([prompt], sampling_params)
+        outputs = _llm.generate([prompt], sampling_params, use_tqdm=False)
         
         # Extract generated text and token counts
         if outputs and outputs[0].outputs:
@@ -270,7 +270,7 @@ def run(step_name: str, **kwargs) -> bytes:
             top_p=kwargs.get("top_p", 0.9),
         )
         
-        outputs = _llm.generate([prompt], sampling_params)
+        outputs = _llm.generate([prompt], sampling_params, use_tqdm=False)
         
         # Extract generated text and token counts
         if outputs and outputs[0].outputs:

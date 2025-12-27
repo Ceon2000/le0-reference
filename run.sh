@@ -166,6 +166,9 @@ run_le0() {
     
     log "Starting LE-0 execution ($NUM_FLOWS workflows)..."
     
+    # Set PYTHONPATH so LE-0 can import target_vllm
+    export PYTHONPATH="$(pwd)"
+    
     # Capture stdout and stderr separately
     local temp_stdout=$(mktemp)
     local temp_stderr=$(mktemp)
@@ -218,6 +221,8 @@ elif [ "$MODE" = "le0" ]; then
 elif [ "$MODE" = "both" ]; then
     run_standalone || true  # Continue even if standalone fails
     echo ""
+    # Set PYTHONPATH for LE-0 mode (run_le0 will also set it, but ensure it's set)
+    export PYTHONPATH="$(pwd)"
     run_le0 || true  # Continue even if LE-0 fails
     
     # Print comparison summary
