@@ -26,9 +26,12 @@ MODE=standalone bash run.sh
 
 # vLLM+LE-0 (requires LE0_WHEEL)
 MODE=le0 LE0_WHEEL=dist/<le0_wheel>.whl bash run.sh
+
+# Both comparisons sequentially (requires LE0_WHEEL)
+MODE=both LE0_WHEEL=dist/<le0_wheel>.whl bash run.sh
 ```
 
-If `MODE` is not specified, it defaults to `le0`.
+If `MODE` is not specified, it defaults to `le0`. `MODE=both` runs vLLM Standalone followed by vLLM+LE-0 for side-by-side comparison.
 
 The standalone mode establishes baseline per-step latency and token counts; the LE-0 mode demonstrates bounded reuse across steps using the same workflow.
 
@@ -45,8 +48,8 @@ The script executes 3 steps (planner/executor/verifier) and prints:
 
 ## Environment Variables
 
-- `LE0_WHEEL` (required for MODE=le0): Path to LE-0 wheel file
-- `MODE` (optional): `standalone` or `le0`, defaults to `le0`
+- `LE0_WHEEL` (required for MODE=le0 and MODE=both): Path to LE-0 wheel file
+- `MODE` (optional): `standalone`, `le0`, or `both`, defaults to `le0`
 - `MODEL` (optional): Model ID, defaults to `allenai/Olmo-3-7B-Think`
 - `QUIET` (optional): Set to `1` to suppress `[PROGRESS]` messages
 

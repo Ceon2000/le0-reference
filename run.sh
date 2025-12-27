@@ -10,17 +10,24 @@ log() {
 
 # Parse MODE (defaults to le0)
 MODE="${MODE:-le0}"
-if [ "$MODE" != "standalone" ] && [ "$MODE" != "le0" ]; then
-    echo "ERROR: MODE must be 'standalone' or 'le0'"
+if [ "$MODE" != "standalone" ] && [ "$MODE" != "le0" ] && [ "$MODE" != "both" ]; then
+    echo "ERROR: MODE must be 'standalone', 'le0', or 'both'"
     echo "Usage: MODE=standalone bash run.sh"
     echo "       MODE=le0 LE0_WHEEL=dist/<le0_wheel>.whl bash run.sh"
+    echo "       MODE=both LE0_WHEEL=dist/<le0_wheel>.whl bash run.sh"
     exit 1
 fi
 
-# Check LE0_WHEEL only for MODE=le0
+# Check LE0_WHEEL for modes that require it
 if [ "$MODE" = "le0" ] && [ -z "${LE0_WHEEL:-}" ]; then
-    echo "ERROR: LE0_WHEEL environment variable is required for MODE=le0"
-    echo "Usage: MODE=le0 LE0_WHEEL=dist/<le0_wheel>.whl bash run.sh"
+    echo "ERROR: LE0_WHEEL environment variable is required for MODE=le0" >&2
+    echo "Usage: MODE=le0 LE0_WHEEL=dist/<le0_wheel>.whl bash run.sh" >&2
+    exit 1
+fi
+
+if [ "$MODE" = "both" ] && [ -z "${LE0_WHEEL:-}" ]; then
+    echo "ERROR: LE0_WHEEL environment variable is required for MODE=both" >&2
+    echo "Usage: MODE=both LE0_WHEEL=dist/<le0_wheel>.whl bash run.sh" >&2
     exit 1
 fi
 
@@ -29,6 +36,9 @@ if [ "$MODE" = "standalone" ]; then
     echo "vLLM Standalone"
 elif [ "$MODE" = "le0" ]; then
     echo "vLLM+LE-0"
+elif [ "$MODE" = "both" ]; then
+    # Banner will be printed in helper functions
+    :
 fi
 
 # Set default model if not provided
@@ -56,8 +66,8 @@ fi
 pip install $PIP_QUIET_FLAG -r requirements.txt
 log "Requirements installed"
 
-# Install LE-0 wheel only for MODE=le0
-if [ "$MODE" = "le0" ]; then
+# Install LE-0 wheel for modes that need it
+if [ "$MODE" = "le0" ] || [ "$MODE" = "both" ]; then
     if [ "${QUIET:-0}" != "1" ]; then
         echo "[PROGRESS] Installing LE-0 wheel (this may take a few minutes)" >&2
     fi
@@ -76,26 +86,43 @@ if [ "$MODE" = "le0" ]; then
     elif python -m le0 --help &> /dev/null 2>&1; then
         LE0_CMD="python -m le0"
     else
-        echo "ERROR: Could not find LE-0 CLI entrypoint."
-        echo "Tried: le0, le0-runtime, python -m le0"
-        echo "Please ensure LE-0 wheel is correctly installed."
+        echo "ERROR: Could not find LE-0 CLI entrypoint." >&2
+        echo "Tried: le0, le0-runtime, python -m le0" >&2
+        echo "Please ensure LE-0 wheel is correctly installed." >&2
         exit 1
     fi
 fi
 
-# Expand flow with fixture content
-log "Expanding flow with fixture content..."
-python3 run_flow.py flows/three_step.json flows/_expanded.json
-log "Flow expanded"
-
-# Execute based on mode
-if [ "$MODE" = "standalone" ]; then
+# Helper function to run standalone mode
+run_standalone() {
+    echo "vLLM Standalone"
+    log "Expanding flow with fixture content..."
+    python3 run_flow.py flows/three_step.json flows/_expanded.json
+    log "Flow expanded"
     log "Starting standalone execution..."
     python3 standalone_runner.py flows/_expanded.json
     log "Standalone execution completed"
-elif [ "$MODE" = "le0" ]; then
+}
+
+# Helper function to run LE-0 mode
+run_le0() {
+    echo "vLLM+LE-0"
+    log "Expanding flow with fixture content..."
+    python3 run_flow.py flows/three_step.json flows/_expanded.json
+    log "Flow expanded"
     log "Starting LE-0 execution..."
     "$LE0_CMD" flows/_expanded.json
     log "LE-0 execution completed"
+}
+
+# Execute based on mode
+if [ "$MODE" = "standalone" ]; then
+    run_standalone
+elif [ "$MODE" = "le0" ]; then
+    run_le0
+elif [ "$MODE" = "both" ]; then
+    run_standalone
+    echo ""
+    run_le0
 fi
 
