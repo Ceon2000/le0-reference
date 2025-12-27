@@ -1,0 +1,16 @@
+[project]
+name = "helpdesk-ai"
+version = "0.1.0"
+description = "Helpdesk triage service with AI-assisted routing"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+

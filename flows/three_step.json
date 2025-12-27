@@ -1,0 +1,18 @@
+{
+  "input": "Solve the problem: What is 2 + 2?",
+  "steps": [
+    {
+      "name": "planner",
+      "instruction": "Plan the approach to solve this problem step by step."
+    },
+    {
+      "name": "executor",
+      "instruction": "Execute the planned steps to solve the problem."
+    },
+    {
+      "name": "verifier",
+      "instruction": "Verify the solution is correct and provide final answer."
+    }
+  ]
+}
+
