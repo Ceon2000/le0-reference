@@ -1,96 +1,62 @@
-# LE-0 Reference Implementation with vLLM
+# LE-0 Reference Implementation
 
-This repository provides a reference implementation for A/B comparison between vLLM Standalone and vLLM+LE-0 using the `allenai/Olmo-3-7B-Think` model.
+## What this is / What this is not
+
+This repository provides a runnable reference example that compares vLLM standalone execution against vLLM execution wrapped with LE-0 for a realistic multi-step workflow.
+
+**What this is:** A reference implementation wrapper for evaluating LE-0.
+
+**What this is not:** LE-0 itself. The LE-0 runtime is distributed separately and must be obtained independently.
+
+## Getting LE-0
+
+To run this example, you must first request access to the LE-0 runtime.
+
+[Request LE-0 runtime access here] (you will receive a wheel file for local installation)
+
+Once you have the LE-0 wheel file, set `LE0_WHEEL` to its path.
 
 ## Quick Start
 
-From a fresh shell on RunPod A40:
-
-### vLLM Standalone
+**Prerequisites:** Python 3.8+, CUDA-capable GPU, LE-0 wheel file (for MODE=le0 only).
 
 ```bash
+# vLLM Standalone (no LE-0 wheel required)
 MODE=standalone bash run.sh
-```
 
-### vLLM+LE-0
-
-```bash
+# vLLM+LE-0 (requires LE0_WHEEL)
 MODE=le0 LE0_WHEEL=dist/<le0_wheel>.whl bash run.sh
 ```
 
-**Note:** `LE0_WHEEL` is only required for `MODE=le0`. If `MODE` is not specified, it defaults to `le0`.
+If `MODE` is not specified, it defaults to `le0`.
+
+The standalone mode establishes baseline per-step latency and token counts; the LE-0 mode demonstrates bounded reuse across steps using the same workflow.
 
 ## Expected Output
 
-The script will automatically inject the complete `fixtures/helpdesk_ai/` codebase into the flow input before step 1, making the prompt >=10k tokens. The script will execute 3 steps (planner/executor/verifier) and print:
+The script executes 3 steps (planner/executor/verifier) and prints:
 
-- One banner line indicating the mode:
-  - `vLLM Standalone` (for MODE=standalone)
-  - `vLLM+LE-0` (for MODE=le0)
+- Banner: `vLLM Standalone` or `vLLM+LE-0`
+- One `[INPUT]` line: `fixture_bytes=... fixture_files=...`
+- Three `[TARGET]` lines: `step=... latency_ms=... prompt_tokens=... decode_tokens=... local_out_hash=...`
+- In `MODE=le0`, LE-0 prints additional per-step hash lines
 
-- One `[INPUT]` line before step 1:
-  - `fixture_bytes`: Total bytes loaded from fixture files
-  - `fixture_files`: Number of fixture files loaded
-
-- Per-step target metrics with `[TARGET]` prefix (one line per step):
-  - `step`: Step name (planner, executor, verifier)
-  - `latency_ms`: Generation latency in milliseconds
-  - `prompt_tokens`: Number of tokens in the prompt
-  - `decode_tokens`: Number of tokens generated
-  - `local_out_hash`: SHA256 hash (first 8 chars) of the output bytes
-
-- In `MODE=le0`, LE-0 will print its own per-step hash lines (printed by LE-0)
-
-- **No model output text is printed** (IP-safe)
-
-Example output format for MODE=standalone:
-```
-vLLM Standalone
-[INPUT] fixture_bytes=115185 fixture_files=40
-[TARGET] step=planner latency_ms=1234.56 prompt_tokens=12456 decode_tokens=128 local_out_hash=a1b2c3d4
-[TARGET] step=executor latency_ms=2345.67 prompt_tokens=12567 decode_tokens=256 local_out_hash=e5f6g7h8
-[TARGET] step=verifier latency_ms=3456.78 prompt_tokens=12678 decode_tokens=192 local_out_hash=i9j0k1l2
-```
-
-Example output format for MODE=le0:
-```
-vLLM+LE-0
-[INPUT] fixture_bytes=115185 fixture_files=40
-[TARGET] step=planner latency_ms=1234.56 prompt_tokens=12456 decode_tokens=128 local_out_hash=a1b2c3d4
-[LE-0 hash line printed by LE-0]
-[TARGET] step=executor latency_ms=2345.67 prompt_tokens=12567 decode_tokens=256 local_out_hash=e5f6g7h8
-[LE-0 hash line printed by LE-0]
-[TARGET] step=verifier latency_ms=3456.78 prompt_tokens=12678 decode_tokens=192 local_out_hash=i9j0k1l2
-[LE-0 hash line printed by LE-0]
-```
+**No model output text is printed** (IP-safe: hashes and metrics only). Correctness is verified via step execution completion and stable per-step output hashes; performance characteristics are reflected in latency and token counts.
 
 ## Environment Variables
 
-- `MODE` (optional): Execution mode - `standalone` (vLLM Standalone) or `le0` (vLLM+LE-0). Defaults to `le0`.
-- `LE0_WHEEL` (required for MODE=le0): Path to the LE-0 wheel file
-- `MODEL` (optional): Model ID to use (defaults to `allenai/Olmo-3-7B-Think`)
-- `LE0_TARGET` (optional, for MODE=le0): Target entrypoint (defaults to `target_vllm:run`)
+- `LE0_WHEEL` (required for MODE=le0): Path to LE-0 wheel file
+- `MODE` (optional): `standalone` or `le0`, defaults to `le0`
+- `MODEL` (optional): Model ID, defaults to `allenai/Olmo-3-7B-Think`
+- `QUIET` (optional): Set to `1` to suppress `[PROGRESS]` messages
 
-## Architecture
+## What's in this repo
 
-- **target_vllm.py**: vLLM wrapper with model loaded once and reused across steps
-- **fixture_loader.py**: Loads fixture content from `fixtures/helpdesk_ai/`
-- **run_flow.py**: Expands flow JSON with fixture content before execution
-- **standalone_runner.py**: Direct execution runner for MODE=standalone
-- **flows/three_step.json**: Flow definition with input and three steps
-- **run.sh**: Setup script that creates venv, installs dependencies, expands flow, and runs either standalone or LE-0
+- `target_vllm.py`: vLLM wrapper implementing the target interface
+- `fixture_loader.py`: Loads fixture codebase from `fixtures/helpdesk_ai/`
+- `run_flow.py`: Expands flow JSON with fixture content
+- `standalone_runner.py`: Direct step execution for MODE=standalone
+- `run.sh`: Setup and execution script
+- `flows/three_step.json`: Flow definition with three steps
 
-## Features
-
-- Model is loaded once and reused across steps
-- Uses vLLM for efficient inference
-- Automatically injects large fixture codebase (>=10k tokens) into flow input
-- Tolerant to unknown kwargs
-- IP-safe: no model output text printed
-- A/B comparison: vLLM Standalone vs vLLM+LE-0
-
-## Requirements
-
-- Python 3.8+
-- CUDA-capable GPU (for vLLM)
-- LE-0 wheel file (only required for MODE=le0)
+**Non-goals:** This reference does not measure throughput, batching efficiency, or cross-node behavior.
