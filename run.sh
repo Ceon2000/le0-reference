@@ -34,6 +34,15 @@ fi
 # Set default model if not provided
 export MODEL="${MODEL:-allenai/Olmo-3-7B-Think}"
 
+# Configure pip progress bar based on QUIET
+if [ "${QUIET:-0}" = "1" ]; then
+    export PIP_PROGRESS_BAR=off
+    PIP_QUIET_FLAG="-q"
+else
+    export PIP_PROGRESS_BAR=on
+    PIP_QUIET_FLAG=""
+fi
+
 # Create virtual environment
 log "Creating virtual environment..."
 python3 -m venv venv > /dev/null 2>&1
@@ -41,14 +50,18 @@ source venv/bin/activate
 log "Virtual environment activated"
 
 # Install requirements
-log "Installing requirements..."
-pip install --quiet -r requirements.txt > /dev/null 2>&1
+if [ "${QUIET:-0}" != "1" ]; then
+    echo "[PROGRESS] Installing python deps (this may take a few minutes)" >&2
+fi
+pip install $PIP_QUIET_FLAG -r requirements.txt
 log "Requirements installed"
 
 # Install LE-0 wheel only for MODE=le0
 if [ "$MODE" = "le0" ]; then
-    log "Installing LE-0 wheel: $LE0_WHEEL"
-    pip install --quiet "$LE0_WHEEL" > /dev/null 2>&1
+    if [ "${QUIET:-0}" != "1" ]; then
+        echo "[PROGRESS] Installing LE-0 wheel (this may take a few minutes)" >&2
+    fi
+    pip install $PIP_QUIET_FLAG "$LE0_WHEEL"
     log "LE-0 wheel installed"
     
     # Set LE-0 target entrypoint
