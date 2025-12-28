@@ -48,6 +48,10 @@ fi
 # Set default model if not provided
 export MODEL="${MODEL:-allenai/Olmo-3-7B-Think}"
 
+# Set default GPU power if not provided (W) - used for energy calculations
+# Can be overridden with GPU_POWER env var, or will try nvidia-smi
+export GPU_POWER="${GPU_POWER:-140.0}"
+
 # Suppress vLLM and torch internal logs
 export VLLM_LOGGING_LEVEL=ERROR
 export TOKENIZERS_PARALLELISM=false
@@ -116,6 +120,23 @@ python_calc() {
     else
         echo "$result"
     fi
+}
+
+# Helper function to get GPU power (W)
+# Tries nvidia-smi first, falls back to GPU_POWER env var, then default estimate
+get_gpu_power() {
+    local power
+    # Try nvidia-smi to get current GPU power
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        power=$(nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits 2>/dev/null | head -1 | xargs)
+        if [ -n "$power" ] && [ "$power" != "N/A" ]; then
+            echo "$power"
+            return
+        fi
+    fi
+    # Fall back to environment variable or default estimate
+    power="${GPU_POWER:-140.0}"
+    echo "$power"
 }
 
 # Helper function to capture metrics from stderr
@@ -310,11 +331,39 @@ elif [ "$MODE" = "both" ]; then
         fi
         le0_avg_latency=$(python_calc "$le0_latency / $le0_steps")
         
+        # Get GPU power (W) for energy calculations
+        gpu_power=$(get_gpu_power)
+        
+        # Calculate energy (kJ): Power (W) * Time (s) / 1000
+        # Total time in seconds = total_latency_ms / 1000
+        standalone_total_time_s=$(python_calc "$standalone_latency / 1000.0")
+        le0_total_time_s=$(python_calc "$le0_latency / 1000.0")
+        standalone_energy_kj=$(python_calc "$gpu_power * $standalone_total_time_s / 1000.0")
+        le0_energy_kj=$(python_calc "$gpu_power * $le0_total_time_s / 1000.0")
+        
+        # Calculate tokens/joule: Total tokens / Energy (kJ)
+        standalone_total_tokens=$((standalone_prompt + standalone_decode))
+        le0_total_tokens=$((le0_prompt + le0_decode))
+        if [ "$(python_calc "$standalone_energy_kj > 0")" != "0.0" ]; then
+            standalone_tokens_joule=$(python_calc "$standalone_total_tokens / $standalone_energy_kj")
+        else
+            standalone_tokens_joule="0.0"
+        fi
+        if [ "$(python_calc "$le0_energy_kj > 0")" != "0.0" ]; then
+            le0_tokens_joule=$(python_calc "$le0_total_tokens / $le0_energy_kj")
+        else
+            le0_tokens_joule="0.0"
+        fi
+        
         # Calculate deltas
         token_delta=$((le0_avg_total - standalone_avg_total))
         token_delta_pct=$(python_calc "$token_delta * 100 / $standalone_avg_total" 2>/dev/null || echo "0.0")
         latency_delta=$(python_calc "$le0_avg_latency - $standalone_avg_latency" 2>/dev/null || echo "0.0")
         latency_delta_pct=$(python_calc "$latency_delta * 100 / $standalone_avg_latency" 2>/dev/null || echo "0.0")
+        energy_delta=$(python_calc "$le0_energy_kj - $standalone_energy_kj" 2>/dev/null || echo "0.0")
+        energy_delta_pct=$(python_calc "$energy_delta * 100 / $standalone_energy_kj" 2>/dev/null || echo "0.0")
+        tokens_joule_delta=$(python_calc "$le0_tokens_joule - $standalone_tokens_joule" 2>/dev/null || echo "0.0")
+        tokens_joule_delta_pct=$(python_calc "$tokens_joule_delta * 100 / $standalone_tokens_joule" 2>/dev/null || echo "0.0")
         
         # Print clean comparison table (to stderr, no [PROGRESS] prefix)
         echo "" >&2
@@ -337,11 +386,18 @@ elif [ "$MODE" = "both" ]; then
         printf "%-60s %20s %20s\n" "Avoided Prefill Ratio" "0.0%" "${le0_avoided_ratio}%" >&2
         echo "------------------------------------------------------------------------------------------" >&2
         printf "%-60s %20s %20s\n" "Avg Latency (ms)" "${standalone_avg_latency}" "${le0_avg_latency}" >&2
+        echo "------------------------------------------------------------------------------------------" >&2
+        printf "%-60s %20s %20s\n" "Avg GPU Power (W)" "${gpu_power}" "${gpu_power}" >&2
+        printf "%-60s %20s %20s\n" "Energy (kJ)" "${standalone_energy_kj}" "${le0_energy_kj}" >&2
+        printf "%-60s %20s %20s\n" "Tokens/Joule" "${standalone_tokens_joule}" "${le0_tokens_joule}" >&2
         echo "==========================================================================================" >&2
         echo "📈 vLLM+LE-0 vs vLLM DELTA (Efficiency Focus)" >&2
         echo "------------------------------------------------------------------------------------------" >&2
         printf "%-60s %s\n" "Token change" "$token_delta ($token_delta_pct%)" >&2
         printf "%-60s %s\n" "Latency change" "${latency_delta} ($latency_delta_pct%) ms" >&2
+        echo "------------------------------------------------------------------------------------------" >&2
+        printf "%-60s %s\n" "🔋 Energy change" "${energy_delta} (${energy_delta_pct}%) kJ" >&2
+        printf "%-60s %s\n" "⚡ Tokens/Joule change" "${tokens_joule_delta} (${tokens_joule_delta_pct}%)" >&2
         echo "------------------------------------------------------------------------------------------" >&2
     elif [ -n "$STANDALONE_METRICS" ]; then
         read -r prompt_tokens decode_tokens latency_ms prefill_tokens reused_tokens steps <<< "$STANDALONE_METRICS"
