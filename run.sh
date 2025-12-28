@@ -254,7 +254,8 @@ elif [ "$MODE" = "le0" ]; then
             avoided_prefill=$((prompt_tokens - prefill_tokens))
             avoided_ratio=$(python_calc "$avoided_prefill * 100 / $prompt_tokens")
             avg_latency=$(python_calc "$latency_ms / $steps")
-            log "SUMMARY vLLM+LE-0:       steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_prefill=$avg_prefill avg_reused=$avg_reused avoided_prefill=$avoided_prefill avoided_ratio=${avoided_ratio}% avg_latency_ms=${avg_latency}"
+            # Print clean summary (no [PROGRESS] prefix)
+            echo "[PROGRESS] SUMMARY vLLM+LE-0:       steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_prefill=$avg_prefill avg_reused=$avg_reused avoided_prefill=$avoided_prefill avoided_ratio=${avoided_ratio}% avg_latency_ms=${avg_latency}" >&2
         else
             log "SUMMARY vLLM+LE-0:       steps=$steps (expected $expected_steps) prompt_tokens_total=$prompt_tokens latency_ms_total=${latency_ms%.*}"
         fi
@@ -297,32 +298,33 @@ elif [ "$MODE" = "both" ]; then
         latency_delta=$(python_calc "$le0_avg_latency - $standalone_avg_latency" 2>/dev/null || echo "0.0")
         latency_delta_pct=$(python_calc "$latency_delta * 100 / $standalone_avg_latency" 2>/dev/null || echo "0.0")
         
-        # Print comparison table
-        log "=========================================================================================="
-        log "  Task: multi_task_benchmark | Model: ${MODEL:-allenai/Olmo-3-7B-Think} | Workflows: $NUM_FLOWS"
-        log "=========================================================================================="
-        log "  Tier Definitions:"
-        log "    tier0 = Baseline (vLLM Standalone) - Standard generation, no reuse"
-        log "    tier1 = LE-0 Optimization - Reuse across workflow steps"
-        log "=========================================================================================="
-        log "Metric                                            tier0                    tier1"
-        log "------------------------------------------------------------------------------------------"
-        log "Samples                                             $NUM_FLOWS                        $NUM_FLOWS"
-        log "Avg Input Tokens                                    $standalone_avg_input                       $le0_avg_input"
-        log "Avg Output Tokens                                   $standalone_avg_output                       $le0_avg_output"
-        log "Avg Total Tokens                                    $standalone_avg_total                       $le0_avg_total"
-        log "Avg Prefill Tokens                                  $standalone_avg_input                       $le0_avg_prefill"
-        log "Avg Reused Tokens                                       0                       $le0_avg_reused"
-        log "Avg Avoided Prefill                                        0                       $le0_avg_avoided_prefill"
-        log "Avoided Prefill Ratio                              0.0%                    ${le0_avoided_ratio}%"
-        log "------------------------------------------------------------------------------------------"
-        log "Avg Latency (ms)                                ${standalone_avg_latency}                   ${le0_avg_latency}"
-        log "=========================================================================================="
-        log "📈 TIER 1 vs TIER 0 DELTA (Efficiency Focus)"
-        log "------------------------------------------------------------------------------------------"
-        log "Token change                                  $token_delta ($token_delta_pct%)"
-        log "Latency change                             ${latency_delta} ($latency_delta_pct%) ms"
-        log "------------------------------------------------------------------------------------------"
+        # Print clean comparison table (to stderr, no [PROGRESS] prefix)
+        echo "" >&2
+        echo "==========================================================================================" >&2
+        echo "  Task: multi_task_benchmark | Model: ${MODEL:-allenai/Olmo-3-7B-Think} | Workflows: $NUM_FLOWS" >&2
+        echo "==========================================================================================" >&2
+        echo "  Tier Definitions:" >&2
+        echo "    tier0 = Baseline (vLLM Standalone) - Standard generation, no reuse" >&2
+        echo "    tier1 = LE-0 Optimization - Reuse across workflow steps" >&2
+        echo "==========================================================================================" >&2
+        printf "%-60s %20s %20s\n" "Metric" "tier0" "tier1" >&2
+        echo "------------------------------------------------------------------------------------------" >&2
+        printf "%-60s %20s %20s\n" "Samples" "$NUM_FLOWS" "$NUM_FLOWS" >&2
+        printf "%-60s %20s %20s\n" "Avg Input Tokens" "$standalone_avg_input" "$le0_avg_input" >&2
+        printf "%-60s %20s %20s\n" "Avg Output Tokens" "$standalone_avg_output" "$le0_avg_output" >&2
+        printf "%-60s %20s %20s\n" "Avg Total Tokens" "$standalone_avg_total" "$le0_avg_total" >&2
+        printf "%-60s %20s %20s\n" "Avg Prefill Tokens" "$standalone_avg_input" "$le0_avg_prefill" >&2
+        printf "%-60s %20s %20s\n" "Avg Reused Tokens" "0" "$le0_avg_reused" >&2
+        printf "%-60s %20s %20s\n" "Avg Avoided Prefill" "$standalone_avg_input" "$le0_avg_avoided_prefill" >&2
+        printf "%-60s %20s %20s\n" "Avoided Prefill Ratio" "0.0%" "${le0_avoided_ratio}%" >&2
+        echo "------------------------------------------------------------------------------------------" >&2
+        printf "%-60s %20s %20s\n" "Avg Latency (ms)" "${standalone_avg_latency}" "${le0_avg_latency}" >&2
+        echo "==========================================================================================" >&2
+        echo "📈 TIER 1 vs TIER 0 DELTA (Efficiency Focus)" >&2
+        echo "------------------------------------------------------------------------------------------" >&2
+        printf "%-60s %s\n" "Token change" "$token_delta ($token_delta_pct%)" >&2
+        printf "%-60s %s\n" "Latency change" "${latency_delta} ($latency_delta_pct%) ms" >&2
+        echo "------------------------------------------------------------------------------------------" >&2
     elif [ -n "$STANDALONE_METRICS" ]; then
         read -r prompt_tokens decode_tokens latency_ms prefill_tokens reused_tokens steps <<< "$STANDALONE_METRICS"
         avg_input_tokens=$((prompt_tokens / steps))
@@ -338,8 +340,9 @@ elif [ "$MODE" = "both" ]; then
         avg_prefill=$((prefill_tokens / steps))
         avg_reused=$((reused_tokens / steps))
         avoided_prefill=$((prompt_tokens - prefill_tokens))
-        avoided_ratio=$(echo "scale=1; $avoided_prefill * 100 / $prompt_tokens" | bc)
+        avoided_ratio=$(python_calc "$avoided_prefill * 100 / $prompt_tokens")
         avg_latency=$(python_calc "$latency_ms / $steps")
-        log "SUMMARY vLLM+LE-0:       steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_prefill=$avg_prefill avg_reused=$avg_reused avoided_prefill=$avoided_prefill avoided_ratio=${avoided_ratio}% avg_latency_ms=${avg_latency}"
+        # Print clean summary (no [PROGRESS] prefix)
+        echo "[PROGRESS] SUMMARY vLLM+LE-0:       steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_prefill=$avg_prefill avg_reused=$avg_reused avoided_prefill=$avoided_prefill avoided_ratio=${avoided_ratio}% avg_latency_ms=${avg_latency}" >&2
     fi
 fi
