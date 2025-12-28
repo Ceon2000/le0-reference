@@ -312,7 +312,12 @@ elif [ "$MODE" = "both" ]; then
         standalone_avg_input=$((standalone_prompt / standalone_steps))
         standalone_avg_output=$((standalone_decode / standalone_steps))
         standalone_avg_total=$(((standalone_prompt + standalone_decode) / standalone_steps))
-        standalone_avg_latency=$(python_calc "$standalone_latency / $standalone_steps")
+        # Calculate average latency with proper error handling
+        if [ -n "$standalone_latency" ] && [ "$standalone_steps" -gt 0 ]; then
+            standalone_avg_latency=$(python_calc "$standalone_latency / $standalone_steps")
+        else
+            standalone_avg_latency="0.0"
+        fi
         
         le0_avg_input=$((le0_prompt / le0_steps))
         le0_avg_output=$((le0_decode / le0_steps))
@@ -323,13 +328,19 @@ elif [ "$MODE" = "both" ]; then
         # This is approximated as: total_prompt_tokens - total_prefill_tokens
         le0_avoided_prefill=$((le0_prompt - le0_prefill))
         le0_avg_avoided_prefill=$((le0_avoided_prefill / le0_steps))
-        # Calculate avoided ratio: (total_avoided_prefill / total_prompt_tokens) * 100
-        if [ "$le0_prompt" -gt 0 ]; then
-            le0_avoided_ratio=$(python_calc "$le0_avoided_prefill * 100.0 / $le0_prompt")
+        # Calculate avoided ratio: (avg_avoided_prefill / avg_input_tokens) * 100
+        # This shows what percentage of input tokens were avoided due to reuse
+        if [ "$le0_avg_input" -gt 0 ]; then
+            le0_avoided_ratio=$(python_calc "$le0_avg_avoided_prefill * 100.0 / $le0_avg_input")
         else
             le0_avoided_ratio="0.0"
         fi
-        le0_avg_latency=$(python_calc "$le0_latency / $le0_steps")
+        # Calculate average latency with proper error handling
+        if [ -n "$le0_latency" ] && [ "$le0_steps" -gt 0 ]; then
+            le0_avg_latency=$(python_calc "$le0_latency / $le0_steps")
+        else
+            le0_avg_latency="0.0"
+        fi
         
         # Get GPU power (W) for energy calculations
         gpu_power=$(get_gpu_power)
