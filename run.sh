@@ -104,6 +104,11 @@ if ! ./venv/bin/python scripts/preflight.py; then
     exit 1
 fi
 
+# Helper function for Python-based floating point calculations (replaces bc)
+python_calc() {
+    ./venv/bin/python -c "try: print(round($1, 1)); except: print('0.0')" 2>/dev/null || echo "0.0"
+}
+
 # Helper function to capture metrics from stderr
 capture_metrics() {
     local output_file="$1"
@@ -232,7 +237,7 @@ if [ "$MODE" = "standalone" ]; then
         avg_input_tokens=$((prompt_tokens / steps))
         avg_output_tokens=$((decode_tokens / steps))
         avg_total_tokens=$(((prompt_tokens + decode_tokens) / steps))
-        avg_latency=$(echo "scale=1; $latency_ms / $steps" | bc)
+        avg_latency=$(python_calc "$latency_ms / $steps")
         log "SUMMARY vLLM Standalone: steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_latency_ms=${avg_latency}"
     fi
 elif [ "$MODE" = "le0" ]; then
@@ -247,8 +252,8 @@ elif [ "$MODE" = "le0" ]; then
             avg_prefill=$((prefill_tokens / steps))
             avg_reused=$((reused_tokens / steps))
             avoided_prefill=$((prompt_tokens - prefill_tokens))
-            avoided_ratio=$(echo "scale=1; $avoided_prefill * 100 / $prompt_tokens" | bc)
-            avg_latency=$(echo "scale=1; $latency_ms / $steps" | bc)
+            avoided_ratio=$(python_calc "$avoided_prefill * 100 / $prompt_tokens")
+            avg_latency=$(python_calc "$latency_ms / $steps")
             log "SUMMARY vLLM+LE-0:       steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_prefill=$avg_prefill avg_reused=$avg_reused avoided_prefill=$avoided_prefill avoided_ratio=${avoided_ratio}% avg_latency_ms=${avg_latency}"
         else
             log "SUMMARY vLLM+LE-0:       steps=$steps (expected $expected_steps) prompt_tokens_total=$prompt_tokens latency_ms_total=${latency_ms%.*}"
@@ -272,7 +277,7 @@ elif [ "$MODE" = "both" ]; then
         standalone_avg_input=$((standalone_prompt / standalone_steps))
         standalone_avg_output=$((standalone_decode / standalone_steps))
         standalone_avg_total=$(((standalone_prompt + standalone_decode) / standalone_steps))
-        standalone_avg_latency=$(echo "scale=1; $standalone_latency / $standalone_steps" | bc)
+        standalone_avg_latency=$(python_calc "$standalone_latency / $standalone_steps")
         
         le0_avg_input=$((le0_prompt / le0_steps))
         le0_avg_output=$((le0_decode / le0_steps))
@@ -283,14 +288,14 @@ elif [ "$MODE" = "both" ]; then
         # This is approximated as: total_prompt_tokens - total_prefill_tokens
         le0_avoided_prefill=$((le0_prompt - le0_prefill))
         le0_avg_avoided_prefill=$((le0_avoided_prefill / le0_steps))
-        le0_avoided_ratio=$(echo "scale=1; $le0_avoided_prefill * 100 / $le0_prompt" | bc 2>/dev/null || echo "0.0")
-        le0_avg_latency=$(echo "scale=1; $le0_latency / $le0_steps" | bc)
+        le0_avoided_ratio=$(python_calc "$le0_avoided_prefill * 100 / $le0_prompt" 2>/dev/null || echo "0.0")
+        le0_avg_latency=$(python_calc "$le0_latency / $le0_steps")
         
         # Calculate deltas
         token_delta=$((le0_avg_total - standalone_avg_total))
-        token_delta_pct=$(echo "scale=1; $token_delta * 100 / $standalone_avg_total" | bc 2>/dev/null || echo "0.0")
-        latency_delta=$(echo "scale=1; $le0_avg_latency - $standalone_avg_latency" | bc 2>/dev/null || echo "0.0")
-        latency_delta_pct=$(echo "scale=1; $latency_delta * 100 / $standalone_avg_latency" | bc 2>/dev/null || echo "0.0")
+        token_delta_pct=$(python_calc "$token_delta * 100 / $standalone_avg_total" 2>/dev/null || echo "0.0")
+        latency_delta=$(python_calc "$le0_avg_latency - $standalone_avg_latency" 2>/dev/null || echo "0.0")
+        latency_delta_pct=$(python_calc "$latency_delta * 100 / $standalone_avg_latency" 2>/dev/null || echo "0.0")
         
         # Print comparison table
         log "=========================================================================================="
@@ -323,7 +328,7 @@ elif [ "$MODE" = "both" ]; then
         avg_input_tokens=$((prompt_tokens / steps))
         avg_output_tokens=$((decode_tokens / steps))
         avg_total_tokens=$(((prompt_tokens + decode_tokens) / steps))
-        avg_latency=$(echo "scale=1; $latency_ms / $steps" | bc)
+        avg_latency=$(python_calc "$latency_ms / $steps")
         log "SUMMARY vLLM Standalone: steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_latency_ms=${avg_latency}"
     elif [ -n "$LE0_METRICS" ]; then
         read -r prompt_tokens decode_tokens latency_ms prefill_tokens reused_tokens steps <<< "$LE0_METRICS"
@@ -334,7 +339,7 @@ elif [ "$MODE" = "both" ]; then
         avg_reused=$((reused_tokens / steps))
         avoided_prefill=$((prompt_tokens - prefill_tokens))
         avoided_ratio=$(echo "scale=1; $avoided_prefill * 100 / $prompt_tokens" | bc)
-        avg_latency=$(echo "scale=1; $latency_ms / $steps" | bc)
+        avg_latency=$(python_calc "$latency_ms / $steps")
         log "SUMMARY vLLM+LE-0:       steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_prefill=$avg_prefill avg_reused=$avg_reused avoided_prefill=$avoided_prefill avoided_ratio=${avoided_ratio}% avg_latency_ms=${avg_latency}"
     fi
 fi
