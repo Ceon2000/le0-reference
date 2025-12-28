@@ -322,10 +322,10 @@ elif [ "$MODE" = "both" ]; then
         echo "  Task: multi_task_benchmark | Model: ${MODEL:-allenai/Olmo-3-7B-Think} | Workflows: $NUM_FLOWS" >&2
         echo "==========================================================================================" >&2
         echo "  Tier Definitions:" >&2
-        echo "    tier0 = Baseline (vLLM Standalone) - Standard generation, no reuse" >&2
-        echo "    tier1 = LE-0 Optimization - Reuse across workflow steps" >&2
+        echo "    vLLM = Baseline (vLLM Standalone) - Standard generation, no reuse" >&2
+        echo "    vLLM+LE-0 = LE-0 Optimization - Reuse across workflow steps" >&2
         echo "==========================================================================================" >&2
-        printf "%-60s %20s %20s\n" "Metric" "tier0" "tier1" >&2
+        printf "%-60s %20s %20s\n" "Metric" "vLLM" "vLLM+LE-0" >&2
         echo "------------------------------------------------------------------------------------------" >&2
         printf "%-60s %20s %20s\n" "Samples" "$NUM_FLOWS" "$NUM_FLOWS" >&2
         printf "%-60s %20s %20s\n" "Avg Input Tokens" "$standalone_avg_input" "$le0_avg_input" >&2
@@ -338,7 +338,7 @@ elif [ "$MODE" = "both" ]; then
         echo "------------------------------------------------------------------------------------------" >&2
         printf "%-60s %20s %20s\n" "Avg Latency (ms)" "${standalone_avg_latency}" "${le0_avg_latency}" >&2
         echo "==========================================================================================" >&2
-        echo "📈 TIER 1 vs TIER 0 DELTA (Efficiency Focus)" >&2
+        echo "📈 vLLM+LE-0 vs vLLM DELTA (Efficiency Focus)" >&2
         echo "------------------------------------------------------------------------------------------" >&2
         printf "%-60s %s\n" "Token change" "$token_delta ($token_delta_pct%)" >&2
         printf "%-60s %s\n" "Latency change" "${latency_delta} ($latency_delta_pct%) ms" >&2

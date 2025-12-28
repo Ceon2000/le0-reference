@@ -40,6 +40,7 @@ def _progress(msg: str) -> None:
 
 try:
     from vllm import LLM, SamplingParams
+    import torch
 except ImportError:
     print("[TARGET] ERROR: vLLM not installed. Install with: pip install vllm", file=sys.stderr)
     sys.exit(1)
@@ -179,7 +180,9 @@ def run_prompt(prompt: str, step_name: str, max_tokens: int = 1024, temperature:
     
     _ensure_model_loaded()
     
-    # Record start time for latency measurement
+    # Record start time for latency measurement (GPU synchronized)
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
     start_time = time.time()
     
     # Run vLLM generation
@@ -191,6 +194,10 @@ def run_prompt(prompt: str, step_name: str, max_tokens: int = 1024, temperature:
         )
         
         outputs = _llm.generate([prompt], sampling_params, use_tqdm=False)
+        
+        # Synchronize GPU before measuring end time for accurate latency
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         
         # Extract generated text and token counts
         if outputs and outputs[0].outputs:
@@ -208,7 +215,7 @@ def run_prompt(prompt: str, step_name: str, max_tokens: int = 1024, temperature:
             generated_text = ""
             decode_tokens = 0
         
-        # Calculate latency
+        # Calculate latency (end time already synchronized)
         latency_ms = (time.time() - start_time) * 1000
         
         # Count prompt tokens using tokenizer
@@ -290,7 +297,9 @@ def run(step_name: str, **kwargs) -> bytes:
     
     prompt = "\n\n".join(prompt_parts) if prompt_parts else ""
     
-    # Record start time for latency measurement
+    # Record start time for latency measurement (GPU synchronized)
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
     start_time = time.time()
     
     # Run vLLM generation
@@ -302,6 +311,10 @@ def run(step_name: str, **kwargs) -> bytes:
         )
         
         outputs = _llm.generate([prompt], sampling_params, use_tqdm=False)
+        
+        # Synchronize GPU before measuring end time for accurate latency
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         
         # Extract generated text and token counts
         if outputs and outputs[0].outputs:
@@ -319,7 +332,7 @@ def run(step_name: str, **kwargs) -> bytes:
             generated_text = ""
             decode_tokens = 0
         
-        # Calculate latency
+        # Calculate latency (end time already synchronized)
         latency_ms = (time.time() - start_time) * 1000
         
         # Count prompt tokens using tokenizer
