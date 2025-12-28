@@ -16,3 +16,6 @@ htmlcov/
 .DS_Store
 *.log
 
+# Generated flow files
+flows/_expanded_*.json
+
