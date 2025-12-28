@@ -10,6 +10,8 @@ import time
 import hashlib
 import logging
 import json
+import warnings
+import contextlib
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -18,9 +20,18 @@ logging.getLogger("vllm").setLevel(logging.ERROR)
 logging.getLogger("torch").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 logging.getLogger("tokenizers").setLevel(logging.ERROR)
+logging.getLogger("safetensors").setLevel(logging.ERROR)
 
-# Suppress tqdm progress bars
+# Suppress tqdm progress bars and other verbose output
 os.environ.setdefault("TQDM_DISABLE", "1")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_EXPERIMENTAL_WARNING", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
+# Suppress torch warnings (already imported above)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore")
 
 def _progress(msg: str) -> None:
     """Print progress message to stderr unless QUIET=1."""
@@ -117,7 +128,10 @@ def _ensure_model_loaded():
     if _llm is None or _model_id != current_model_id:
         try:
             _progress("loading model")
-            _llm = LLM(model=current_model_id, trust_remote_code=True)
+            # Suppress stdout/stderr during model loading to hide safetensors/CUDA progress bars
+            with open(os.devnull, 'w') as devnull:
+                with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+                    _llm = LLM(model=current_model_id, trust_remote_code=True)
             _model_id = current_model_id
             _progress("model loaded")
         except Exception as e:

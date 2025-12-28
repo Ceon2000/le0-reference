@@ -52,6 +52,10 @@ export MODEL="${MODEL:-allenai/Olmo-3-7B-Think}"
 export VLLM_LOGGING_LEVEL=ERROR
 export TOKENIZERS_PARALLELISM=false
 export TRANSFORMERS_VERBOSITY=error
+export TQDM_DISABLE=1
+export HF_HUB_DISABLE_PROGRESS_BARS=1
+export HF_HUB_DISABLE_EXPERIMENTAL_WARNING=1
+export PYTHONWARNINGS=ignore
 
 # Configure pip progress bar based on QUIET
 if [ "${QUIET:-0}" = "1" ]; then
