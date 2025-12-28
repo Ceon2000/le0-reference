@@ -158,6 +158,9 @@ run_standalone() {
     trap "rm -f $temp_output" EXIT
     
     # Capture stderr (stdout goes to terminal naturally)
+    # Clear Python cache to ensure fresh code is used
+    find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+    find . -name "*.pyc" -delete 2>/dev/null || true
     if NUM_FLOWS="$NUM_FLOWS" ./venv/bin/python standalone_runner.py 2> "$temp_output"; then
         log "Standalone execution completed"
         # Display stderr
@@ -194,6 +197,9 @@ run_le0() {
     local temp_stderr=$(mktemp)
     trap "rm -f $temp_stdout $temp_stderr" EXIT
     
+    # Clear Python cache to ensure fresh code is used
+    find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+    find . -name "*.pyc" -delete 2>/dev/null || true
     # Run LE-0: stdout (hash-only) goes to console, stderr (metrics) goes to temp file
     if "$LE0_CMD" --num_flows "$NUM_FLOWS" > "$temp_stdout" 2> "$temp_stderr"; then
         log "LE-0 execution completed"

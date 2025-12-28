@@ -128,10 +128,19 @@ def _ensure_model_loaded():
     if _llm is None or _model_id != current_model_id:
         try:
             _progress("loading model")
-            # Suppress stdout/stderr during model loading to hide safetensors/CUDA progress bars
-            with open(os.devnull, 'w') as devnull:
-                with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-                    _llm = LLM(model=current_model_id, trust_remote_code=True)
+            # Aggressively suppress all output during model loading
+            # Directly replace sys.stdout/stderr (more effective than redirect_stdout for subprocesses)
+            devnull = open(os.devnull, 'w')
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+            try:
+                sys.stdout = devnull
+                sys.stderr = devnull
+                _llm = LLM(model=current_model_id, trust_remote_code=True)
+            finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+                devnull.close()
             _model_id = current_model_id
             _progress("model loaded")
         except Exception as e:
