@@ -344,12 +344,15 @@ elif [ "$MODE" = "both" ]; then
         # Calculate tokens/joule: Total tokens / Energy (kJ)
         standalone_total_tokens=$((standalone_prompt + standalone_decode))
         le0_total_tokens=$((le0_prompt + le0_decode))
-        if [ "$(python_calc "$standalone_energy_kj > 0")" != "0.0" ]; then
+        # Check if energy > 0 using Python comparison
+        standalone_energy_check=$(./venv/bin/python -c "print(1 if $standalone_energy_kj > 0 else 0)" 2>/dev/null || echo "0")
+        le0_energy_check=$(./venv/bin/python -c "print(1 if $le0_energy_kj > 0 else 0)" 2>/dev/null || echo "0")
+        if [ "$standalone_energy_check" = "1" ]; then
             standalone_tokens_joule=$(python_calc "$standalone_total_tokens / $standalone_energy_kj")
         else
             standalone_tokens_joule="0.0"
         fi
-        if [ "$(python_calc "$le0_energy_kj > 0")" != "0.0" ]; then
+        if [ "$le0_energy_check" = "1" ]; then
             le0_tokens_joule=$(python_calc "$le0_total_tokens / $le0_energy_kj")
         else
             le0_tokens_joule="0.0"
