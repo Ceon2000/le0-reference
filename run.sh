@@ -106,7 +106,16 @@ fi
 
 # Helper function for Python-based floating point calculations (replaces bc)
 python_calc() {
-    ./venv/bin/python -c "try: print(round($1, 1)); except: print('0.0')" 2>/dev/null || echo "0.0"
+    local expr="$1"
+    local result
+    # Use Python to calculate and round to 1 decimal place
+    result=$(./venv/bin/python -c "try: print('{:.1f}'.format(round($expr, 1))); except: print('0.0')" 2>/dev/null)
+    # If result is empty or calculation failed, return 0.0
+    if [ -z "$result" ]; then
+        echo "0.0"
+    else
+        echo "$result"
+    fi
 }
 
 # Helper function to capture metrics from stderr
@@ -278,6 +287,10 @@ elif [ "$MODE" = "both" ]; then
         standalone_avg_input=$((standalone_prompt / standalone_steps))
         standalone_avg_output=$((standalone_decode / standalone_steps))
         standalone_avg_total=$(((standalone_prompt + standalone_decode) / standalone_steps))
+        # Calculate averages with proper floating point division
+        standalone_avg_input=$((standalone_prompt / standalone_steps))
+        standalone_avg_output=$((standalone_decode / standalone_steps))
+        standalone_avg_total=$(((standalone_prompt + standalone_decode) / standalone_steps))
         standalone_avg_latency=$(python_calc "$standalone_latency / $standalone_steps")
         
         le0_avg_input=$((le0_prompt / le0_steps))
@@ -289,7 +302,12 @@ elif [ "$MODE" = "both" ]; then
         # This is approximated as: total_prompt_tokens - total_prefill_tokens
         le0_avoided_prefill=$((le0_prompt - le0_prefill))
         le0_avg_avoided_prefill=$((le0_avoided_prefill / le0_steps))
-        le0_avoided_ratio=$(python_calc "$le0_avoided_prefill * 100 / $le0_prompt" 2>/dev/null || echo "0.0")
+        # Calculate avoided ratio: (total_avoided_prefill / total_prompt_tokens) * 100
+        if [ "$le0_prompt" -gt 0 ]; then
+            le0_avoided_ratio=$(python_calc "$le0_avoided_prefill * 100.0 / $le0_prompt")
+        else
+            le0_avoided_ratio="0.0"
+        fi
         le0_avg_latency=$(python_calc "$le0_latency / $le0_steps")
         
         # Calculate deltas
