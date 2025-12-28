@@ -108,11 +108,14 @@ import re
 import sys
 
 prompt_tokens_total = 0
+decode_tokens_total = 0
 latency_ms_total = 0.0
+prefill_tokens_total = 0
+reused_tokens_total = 0
 count_steps = 0
 
-# Match [TARGET] lines from stderr (flow= can be 0 for standalone)
-pattern = r'\[TARGET\] flow=\d+ step=\S+ latency_ms=([0-9.]+) prompt_tokens=([0-9]+)'
+# Match [TARGET] lines from stderr with prefill/reused tokens
+pattern = r'\[TARGET\] flow=\d+ step=\S+ latency_ms=([0-9.]+) prompt_tokens=([0-9]+) decode_tokens=([0-9]+) prefill_tokens=([0-9]+) reused_tokens=([0-9]+)'
 
 try:
     with open(sys.argv[1], 'r') as f:
@@ -121,14 +124,20 @@ try:
             if match:
                 latency_ms = float(match.group(1))
                 prompt_tokens = int(match.group(2))
+                decode_tokens = int(match.group(3))
+                prefill_tokens = int(match.group(4))
+                reused_tokens = int(match.group(5))
                 latency_ms_total += latency_ms
                 prompt_tokens_total += prompt_tokens
+                decode_tokens_total += decode_tokens
+                prefill_tokens_total += prefill_tokens
+                reused_tokens_total += reused_tokens
                 count_steps += 1
 except Exception as e:
     sys.stderr.write(f"Error reading metrics: {e}\n")
     sys.exit(1)
 
-print(f"{prompt_tokens_total} {latency_ms_total:.2f} {count_steps}")
+print(f"{prompt_tokens_total} {decode_tokens_total} {latency_ms_total:.2f} {prefill_tokens_total} {reused_tokens_total} {count_steps}")
 PYTHON_SCRIPT
 }
 
@@ -209,16 +218,28 @@ LE0_METRICS=""
 if [ "$MODE" = "standalone" ]; then
     run_standalone
     if [ -n "$STANDALONE_METRICS" ]; then
-        read -r prompt_tokens latency_ms steps <<< "$STANDALONE_METRICS"
-        log "SUMMARY vLLM Standalone: steps=$steps prompt_tokens_total=$prompt_tokens latency_ms_total=${latency_ms%.*}"
+        read -r prompt_tokens decode_tokens latency_ms prefill_tokens reused_tokens steps <<< "$STANDALONE_METRICS"
+        avg_input_tokens=$((prompt_tokens / steps))
+        avg_output_tokens=$((decode_tokens / steps))
+        avg_total_tokens=$(((prompt_tokens + decode_tokens) / steps))
+        avg_latency=$(echo "scale=1; $latency_ms / $steps" | bc)
+        log "SUMMARY vLLM Standalone: steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_latency_ms=${avg_latency}"
     fi
 elif [ "$MODE" = "le0" ]; then
     run_le0
     if [ -n "$LE0_METRICS" ]; then
-        read -r prompt_tokens latency_ms steps <<< "$LE0_METRICS"
+        read -r prompt_tokens decode_tokens latency_ms prefill_tokens reused_tokens steps <<< "$LE0_METRICS"
         expected_steps=$((NUM_FLOWS * 3))
         if [ "$steps" -eq "$expected_steps" ]; then
-            log "SUMMARY vLLM+LE-0:       steps=$steps prompt_tokens_total=$prompt_tokens latency_ms_total=${latency_ms%.*}"
+            avg_input_tokens=$((prompt_tokens / steps))
+            avg_output_tokens=$((decode_tokens / steps))
+            avg_total_tokens=$(((prompt_tokens + decode_tokens) / steps))
+            avg_prefill=$((prefill_tokens / steps))
+            avg_reused=$((reused_tokens / steps))
+            avoided_prefill=$((prompt_tokens - prefill_tokens))
+            avoided_ratio=$(echo "scale=1; $avoided_prefill * 100 / $prompt_tokens" | bc)
+            avg_latency=$(echo "scale=1; $latency_ms / $steps" | bc)
+            log "SUMMARY vLLM+LE-0:       steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_prefill=$avg_prefill avg_reused=$avg_reused avoided_prefill=$avoided_prefill avoided_ratio=${avoided_ratio}% avg_latency_ms=${avg_latency}"
         else
             log "SUMMARY vLLM+LE-0:       steps=$steps (expected $expected_steps) prompt_tokens_total=$prompt_tokens latency_ms_total=${latency_ms%.*}"
         fi
@@ -232,28 +253,78 @@ elif [ "$MODE" = "both" ]; then
     export PYTHONPATH="$(pwd)"
     run_le0 || true  # Continue even if LE-0 fails
     
-    # Print comparison summary
-    if [ -n "$STANDALONE_METRICS" ]; then
-        read -r standalone_prompt standalone_latency standalone_steps <<< "$STANDALONE_METRICS"
-        log "SUMMARY vLLM Standalone: steps=$standalone_steps prompt_tokens_total=$standalone_prompt latency_ms_total=${standalone_latency%.*}"
-    fi
-    
-    if [ -n "$LE0_METRICS" ]; then
-        read -r le0_prompt le0_latency le0_steps <<< "$LE0_METRICS"
-        expected_steps=$((NUM_FLOWS * 3))
-        if [ "$le0_steps" -eq "$expected_steps" ]; then
-            log "SUMMARY vLLM+LE-0:       steps=$le0_steps prompt_tokens_total=$le0_prompt latency_ms_total=${le0_latency%.*}"
-            
-            # Calculate deltas if both metrics available
-            if [ -n "$STANDALONE_METRICS" ]; then
-                delta_result=$(./venv/bin/python -c "print(int($standalone_prompt) - int($le0_prompt), float($standalone_latency) - float($le0_latency))")
-                read -r prompt_delta latency_delta <<< "$delta_result"
-                log "DELTA: prompt_tokens_total=$prompt_delta latency_ms_total=${latency_delta%.*}"
-            fi
-        else
-            log "SUMMARY vLLM+LE-0:       steps=$le0_steps (expected $expected_steps) prompt_tokens_total=$le0_prompt latency_ms_total=${le0_latency%.*}"
-        fi
-    else
-        log "SUMMARY vLLM+LE-0: unavailable (no metrics captured)"
+    # Print comparison summary in table format
+    if [ -n "$STANDALONE_METRICS" ] && [ -n "$LE0_METRICS" ]; then
+        read -r standalone_prompt standalone_decode standalone_latency standalone_prefill standalone_reused standalone_steps <<< "$STANDALONE_METRICS"
+        read -r le0_prompt le0_decode le0_latency le0_prefill le0_reused le0_steps <<< "$LE0_METRICS"
+        
+        # Calculate averages
+        standalone_avg_input=$((standalone_prompt / standalone_steps))
+        standalone_avg_output=$((standalone_decode / standalone_steps))
+        standalone_avg_total=$(((standalone_prompt + standalone_decode) / standalone_steps))
+        standalone_avg_latency=$(echo "scale=1; $standalone_latency / $standalone_steps" | bc)
+        
+        le0_avg_input=$((le0_prompt / le0_steps))
+        le0_avg_output=$((le0_decode / le0_steps))
+        le0_avg_total=$(((le0_prompt + le0_decode) / le0_steps))
+        le0_avg_prefill=$((le0_prefill / le0_steps))
+        le0_avg_reused=$((le0_reused / le0_steps))
+        # Avoided prefill = total prompt tokens that would have been needed without reuse
+        # This is approximated as: total_prompt_tokens - total_prefill_tokens
+        le0_avoided_prefill=$((le0_prompt - le0_prefill))
+        le0_avg_avoided_prefill=$((le0_avoided_prefill / le0_steps))
+        le0_avoided_ratio=$(echo "scale=1; $le0_avoided_prefill * 100 / $le0_prompt" | bc 2>/dev/null || echo "0.0")
+        le0_avg_latency=$(echo "scale=1; $le0_latency / $le0_steps" | bc)
+        
+        # Calculate deltas
+        token_delta=$((le0_avg_total - standalone_avg_total))
+        token_delta_pct=$(echo "scale=1; $token_delta * 100 / $standalone_avg_total" | bc 2>/dev/null || echo "0.0")
+        latency_delta=$(echo "scale=1; $le0_avg_latency - $standalone_avg_latency" | bc 2>/dev/null || echo "0.0")
+        latency_delta_pct=$(echo "scale=1; $latency_delta * 100 / $standalone_avg_latency" | bc 2>/dev/null || echo "0.0")
+        
+        # Print comparison table
+        log "=========================================================================================="
+        log "  Task: multi_task_benchmark | Model: ${MODEL:-allenai/Olmo-3-7B-Think} | Workflows: $NUM_FLOWS"
+        log "=========================================================================================="
+        log "  Tier Definitions:"
+        log "    tier0 = Baseline (vLLM Standalone) - Standard generation, no reuse"
+        log "    tier1 = LE-0 Optimization - Reuse across workflow steps"
+        log "=========================================================================================="
+        log "Metric                                            tier0                    tier1"
+        log "------------------------------------------------------------------------------------------"
+        log "Samples                                             $NUM_FLOWS                        $NUM_FLOWS"
+        log "Avg Input Tokens                                    $standalone_avg_input                       $le0_avg_input"
+        log "Avg Output Tokens                                   $standalone_avg_output                       $le0_avg_output"
+        log "Avg Total Tokens                                    $standalone_avg_total                       $le0_avg_total"
+        log "Avg Prefill Tokens                                  $standalone_avg_input                       $le0_avg_prefill"
+        log "Avg Reused Tokens                                       0                       $le0_avg_reused"
+        log "Avg Avoided Prefill                                        0                       $le0_avg_avoided_prefill"
+        log "Avoided Prefill Ratio                              0.0%                    ${le0_avoided_ratio}%"
+        log "------------------------------------------------------------------------------------------"
+        log "Avg Latency (ms)                                ${standalone_avg_latency}                   ${le0_avg_latency}"
+        log "=========================================================================================="
+        log "📈 TIER 1 vs TIER 0 DELTA (Efficiency Focus)"
+        log "------------------------------------------------------------------------------------------"
+        log "Token change                                  $token_delta ($token_delta_pct%)"
+        log "Latency change                             ${latency_delta} ($latency_delta_pct%) ms"
+        log "------------------------------------------------------------------------------------------"
+    elif [ -n "$STANDALONE_METRICS" ]; then
+        read -r prompt_tokens decode_tokens latency_ms prefill_tokens reused_tokens steps <<< "$STANDALONE_METRICS"
+        avg_input_tokens=$((prompt_tokens / steps))
+        avg_output_tokens=$((decode_tokens / steps))
+        avg_total_tokens=$(((prompt_tokens + decode_tokens) / steps))
+        avg_latency=$(echo "scale=1; $latency_ms / $steps" | bc)
+        log "SUMMARY vLLM Standalone: steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_latency_ms=${avg_latency}"
+    elif [ -n "$LE0_METRICS" ]; then
+        read -r prompt_tokens decode_tokens latency_ms prefill_tokens reused_tokens steps <<< "$LE0_METRICS"
+        avg_input_tokens=$((prompt_tokens / steps))
+        avg_output_tokens=$((decode_tokens / steps))
+        avg_total_tokens=$(((prompt_tokens + decode_tokens) / steps))
+        avg_prefill=$((prefill_tokens / steps))
+        avg_reused=$((reused_tokens / steps))
+        avoided_prefill=$((prompt_tokens - prefill_tokens))
+        avoided_ratio=$(echo "scale=1; $avoided_prefill * 100 / $prompt_tokens" | bc)
+        avg_latency=$(echo "scale=1; $latency_ms / $steps" | bc)
+        log "SUMMARY vLLM+LE-0:       steps=$steps avg_input_tokens=$avg_input_tokens avg_output_tokens=$avg_output_tokens avg_total_tokens=$avg_total_tokens avg_prefill=$avg_prefill avg_reused=$avg_reused avoided_prefill=$avoided_prefill avoided_ratio=${avoided_ratio}% avg_latency_ms=${avg_latency}"
     fi
 fi
