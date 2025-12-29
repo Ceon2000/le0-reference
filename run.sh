@@ -257,6 +257,8 @@ run_standalone() {
     
     # Extract metrics
     STANDALONE_METRICS=$(capture_metrics "$temp_output")
+    echo "[DEBUG] STANDALONE_METRICS=$STANDALONE_METRICS" >&2
+    echo "[DEBUG] Temp file lines: $(wc -l < "$temp_output") TARGET lines: $(grep -c '\[TARGET\] flow=' "$temp_output" 2>/dev/null || echo 0)" >&2
     rm -f "$temp_output"
 }
 
