@@ -153,7 +153,12 @@ python_calc() {
     local expr="$1"
     local result
     # Use Python to calculate and round to 1 decimal place
-    result=$(./venv/bin/python -c "try: print('{:.1f}'.format(round($expr, 1))); except: print('0.0')" 2>/dev/null)
+    result=$(./venv/bin/python -c "
+try:
+    print('{:.1f}'.format(round($expr, 1)))
+except:
+    print('0.0')
+" 2>/dev/null)
     # If result is empty or calculation failed, return 0.0
     if [ -z "$result" ]; then
         echo "0.0"
@@ -257,8 +262,6 @@ run_standalone() {
     
     # Extract metrics
     STANDALONE_METRICS=$(capture_metrics "$temp_output")
-    echo "[DEBUG] STANDALONE_METRICS=$STANDALONE_METRICS" >&2
-    echo "[DEBUG] Temp file lines: $(wc -l < "$temp_output") TARGET lines: $(grep -c '\[TARGET\] flow=' "$temp_output" 2>/dev/null || echo 0)" >&2
     rm -f "$temp_output"
 }
 
@@ -356,8 +359,6 @@ elif [ "$MODE" = "both" ]; then
         # Parse 8 fields: prompt decode latency prefill reused steps power energy
         read -r standalone_prompt standalone_decode standalone_latency standalone_prefill standalone_reused standalone_steps standalone_power standalone_energy <<< "$STANDALONE_METRICS"
         read -r le0_prompt le0_decode le0_latency le0_prefill le0_reused le0_steps le0_power le0_energy <<< "$LE0_METRICS"
-        echo "[DEBUG] Parsed: standalone_latency=$standalone_latency standalone_steps=$standalone_steps standalone_power=$standalone_power standalone_energy=$standalone_energy" >&2
-        echo "[DEBUG] Parsed: le0_latency=$le0_latency le0_steps=$le0_steps le0_power=$le0_power le0_energy=$le0_energy" >&2
         
         # Validation: check that we actually captured metrics
         if [ "$standalone_steps" = "0" ] || [ -z "$standalone_steps" ]; then
