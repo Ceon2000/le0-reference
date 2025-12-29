@@ -18,4 +18,5 @@ htmlcov/
 
 # Generated flow files
 flows/_expanded_*.json
+flows/.expanded_cache.json
 

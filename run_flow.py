@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
 Flow expansion script that injects fixture content into flow input.
+Includes caching to avoid regenerating flows when inputs haven't changed.
 """
 
 import json
 import os
 import sys
+import hashlib
+import time
 from pathlib import Path
 from fixture_loader import load_fixture
 
@@ -14,6 +17,52 @@ def _progress(msg: str) -> None:
     """Print progress message to stderr unless QUIET=1."""
     if os.environ.get("QUIET", "0") != "1":
         print(f"[PROGRESS] {msg}", file=sys.stderr)
+
+
+def _compute_hash(data: str) -> str:
+    """Compute SHA256 hash of data."""
+    return hashlib.sha256(data.encode('utf-8')).hexdigest()
+
+
+def _load_cache() -> dict:
+    """Load cache metadata from flows/.expanded_cache.json."""
+    cache_file = Path("flows/.expanded_cache.json")
+    if cache_file.exists():
+        try:
+            with open(cache_file, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_cache(cache_data: dict) -> None:
+    """Save cache metadata to flows/.expanded_cache.json."""
+    cache_file = Path("flows/.expanded_cache.json")
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(cache_file, "w") as f:
+        json.dump(cache_data, f, indent=2)
+
+
+def _check_cache_valid(fixture_hash: str, template_hash: str, num_flows: int, cache: dict) -> bool:
+    """Check if cached flows are valid for current inputs."""
+    if cache.get("fixture_hash") != fixture_hash:
+        return False
+    if cache.get("template_hash") != template_hash:
+        return False
+    if cache.get("num_flows") != num_flows:
+        return False
+    
+    # Check if all expanded files exist
+    expanded_files = cache.get("expanded_files", [])
+    if len(expanded_files) != num_flows:
+        return False
+    
+    for fname in expanded_files:
+        if not Path(fname).exists():
+            return False
+    
+    return True
 
 
 def build_expanded_flow(flow_file: str, output_file: str) -> None:
@@ -61,12 +110,19 @@ def build_expanded_flow(flow_file: str, output_file: str) -> None:
 def build_multiple_flows(flow_file: str, num_flows: int = 25) -> None:
     """
     Build multiple expanded flows using prompts from the prompt suite.
+    Uses caching to avoid regenerating flows when inputs haven't changed.
     
     Args:
         flow_file: Path to input flow JSON file
         num_flows: Number of workflows to generate (1-25)
     """
     num_flows = min(max(1, num_flows), 25)  # Clamp to 1-25
+    
+    # Timing: flow expansion start
+    expand_start_time = time.time()
+    
+    # Load cache
+    cache = _load_cache()
     
     # Load prompt suite
     _progress("Loading prompt suite...")
@@ -82,21 +138,37 @@ def build_multiple_flows(flow_file: str, num_flows: int = 25) -> None:
         print(f"ERROR: Prompt suite has only {len(prompt_suite)} prompts, but {num_flows} requested", file=sys.stderr)
         sys.exit(1)
     
-    # Load fixture once to get metrics
+    # Load fixture once to get metrics and compute hash
     _progress("Loading fixture files...")
     fixture_text, fixture_bytes, fixture_files = load_fixture()
     _progress(f"Loaded {fixture_files} fixture files ({fixture_bytes} bytes)")
+    fixture_hash = _compute_hash(fixture_text)
     
-    # Load original flow once
+    # Load original flow once and compute hash
     _progress("Loading flow file...")
     with open(flow_file, "r") as f:
         flow_template = json.load(f)
     
+    template_hash = _compute_hash(json.dumps(flow_template, sort_keys=True))
     original_input = flow_template.get("input", "")
     
+    # Check cache validity
+    if _check_cache_valid(fixture_hash, template_hash, num_flows, cache):
+        _progress(f"Using cached expanded flows (fixture_hash={fixture_hash[:8]}..., template_hash={template_hash[:8]}...)")
+        expand_time = time.time() - expand_start_time
+        print(f"[TIMING] flow_expansion_ms={expand_time * 1000:.2f} (cached)", file=sys.stderr)
+        # Still print [INPUT] line for consistency
+        print(f"[INPUT] fixture_bytes={fixture_bytes} fixture_files={fixture_files}")
+        return
+    
+    # Cache miss: regenerate flows
+    _progress(f"Regenerating expanded flows (cache miss: fixture_hash={fixture_hash[:8]}..., template_hash={template_hash[:8]}...)")
+    
+    expanded_files = []
     # Generate each workflow file
     for i in range(1, num_flows + 1):
         output_file = f"flows/_expanded_{i:02d}.json"
+        expanded_files.append(output_file)
         
         # Select prompt from suite (0-indexed)
         selected_prompt = prompt_suite[i - 1]
@@ -112,7 +184,6 @@ def build_multiple_flows(flow_file: str, num_flows: int = 25) -> None:
         flow["input"] = combined_input
         
         # Write expanded flow
-        _progress(f"Writing expanded flow to {output_file}...")
         output_path = Path(output_file)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
@@ -121,6 +192,18 @@ def build_multiple_flows(flow_file: str, num_flows: int = 25) -> None:
         # Print input metrics for each workflow (required output)
         print(f"[INPUT] fixture_bytes={fixture_bytes} fixture_files={fixture_files}")
     
+    # Save cache
+    cache_data = {
+        "fixture_hash": fixture_hash,
+        "template_hash": template_hash,
+        "num_flows": num_flows,
+        "expanded_files": expanded_files,
+        "created_at": time.time()
+    }
+    _save_cache(cache_data)
+    
+    expand_time = time.time() - expand_start_time
+    print(f"[TIMING] flow_expansion_ms={expand_time * 1000:.2f} (generated)", file=sys.stderr)
     _progress("All flows generated")
 
 

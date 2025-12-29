@@ -48,6 +48,7 @@ except ImportError:
 # Global model and tokenizer (loaded once, reused across steps)
 _llm: Optional[LLM] = None
 _model_id: Optional[str] = None
+_engine_init_timing_logged: bool = False  # Track if we've logged engine init timing
 
 # Flow tracking for LE-0 mode
 _flow_idx: int = 0
@@ -121,32 +122,49 @@ def _get_current_flow_idx() -> int:
 
 
 def _ensure_model_loaded():
-    """Ensure the vLLM model is loaded."""
-    global _llm, _model_id
+    """Ensure the vLLM model is loaded. Returns immediately if already loaded."""
+    global _llm, _model_id, _engine_init_timing_logged
     
+    # Fast path: if engine already loaded and model ID matches, return immediately
     current_model_id = _get_model_id()
+    if _llm is not None and _model_id == current_model_id:
+        return
     
-    if _llm is None or _model_id != current_model_id:
+    # Engine needs to be created - log timing for first init only
+    if not _engine_init_timing_logged:
+        print("[TIMING] engine_init_start", file=sys.stderr)
+        engine_init_start = time.time()
+    
+    try:
+        _progress("loading model")
+        # Aggressively suppress all output during model loading
+        # Directly replace sys.stdout/stderr (more effective than redirect_stdout for subprocesses)
+        devnull = open(os.devnull, 'w')
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
         try:
-            _progress("loading model")
-            # Aggressively suppress all output during model loading
-            # Directly replace sys.stdout/stderr (more effective than redirect_stdout for subprocesses)
-            devnull = open(os.devnull, 'w')
-            old_stdout = sys.stdout
-            old_stderr = sys.stderr
-            try:
-                sys.stdout = devnull
-                sys.stderr = devnull
-                _llm = LLM(model=current_model_id, trust_remote_code=True)
-            finally:
-                sys.stdout = old_stdout
-                sys.stderr = old_stderr
-                devnull.close()
-            _model_id = current_model_id
-            _progress("model loaded")
-        except Exception as e:
-            print(f"[TARGET] ERROR: Failed to load model '{current_model_id}': {e}", file=sys.stderr)
-            raise
+            sys.stdout = devnull
+            sys.stderr = devnull
+            # Prevent torch.distributed init for single-GPU runs
+            # Set environment variables before LLM creation
+            os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+            # Create engine (this will trigger vLLM's internal distributed init, but only once)
+            _llm = LLM(model=current_model_id, trust_remote_code=True)
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+            devnull.close()
+        _model_id = current_model_id
+        _progress("model loaded")
+        
+        # Log timing for first init only
+        if not _engine_init_timing_logged:
+            engine_init_time = time.time() - engine_init_start
+            print(f"[TIMING] engine_init_ms={engine_init_time * 1000:.2f}", file=sys.stderr)
+            _engine_init_timing_logged = True
+    except Exception as e:
+        print(f"[TARGET] ERROR: Failed to load model '{current_model_id}': {e}", file=sys.stderr)
+        raise
 
 
 def _count_tokens(text: str) -> int:
@@ -167,6 +185,9 @@ def run_prompt(prompt: str, step_name: str, max_tokens: int = 1024, temperature:
     """
     Run vLLM generation with an explicit prompt (for standalone mode).
     
+    NOTE: Engine must be pre-loaded via _ensure_model_loaded() before calling this function.
+    This function assumes the engine is already loaded to avoid repeated checks.
+    
     Args:
         prompt: Full prompt text
         step_name: Name of the step
@@ -178,7 +199,10 @@ def run_prompt(prompt: str, step_name: str, max_tokens: int = 1024, temperature:
     """
     global _llm
     
-    _ensure_model_loaded()
+    # Engine should already be loaded by standalone_runner.py before workflow loop
+    # Only check if somehow not loaded (safety check, should not happen)
+    if _llm is None:
+        _ensure_model_loaded()
     
     # Record start time for latency measurement (GPU synchronized)
     if torch.cuda.is_available():
@@ -193,11 +217,15 @@ def run_prompt(prompt: str, step_name: str, max_tokens: int = 1024, temperature:
             top_p=0.9,
         )
         
+        # Generate (this includes prefill + decode)
         outputs = _llm.generate([prompt], sampling_params, use_tqdm=False)
         
         # Synchronize GPU before measuring end time for accurate latency
         if torch.cuda.is_available():
             torch.cuda.synchronize()
+        
+        # Calculate end time
+        end_time = time.time()
         
         # Extract generated text and token counts
         if outputs and outputs[0].outputs:
@@ -216,7 +244,7 @@ def run_prompt(prompt: str, step_name: str, max_tokens: int = 1024, temperature:
             decode_tokens = 0
         
         # Calculate latency (end time already synchronized)
-        latency_ms = (time.time() - start_time) * 1000
+        latency_ms = (end_time - start_time) * 1000
         
         # Count prompt tokens using tokenizer
         prompt_tokens = _count_tokens(prompt)
@@ -248,6 +276,9 @@ def run(step_name: str, **kwargs) -> bytes:
     Run a single LE-0 step through vLLM.
     This function is called by LE-0 and must track flow/step indices internally.
     
+    NOTE: Engine must be pre-loaded via _ensure_model_loaded() before LE-0 starts.
+    This function assumes the engine is already loaded to avoid repeated checks.
+    
     Args:
         step_name: Name of the step (e.g., "planner", "executor", "verifier")
         **kwargs: Additional arguments from LE-0 (may be empty)
@@ -257,7 +288,10 @@ def run(step_name: str, **kwargs) -> bytes:
     """
     global _llm, _flow_idx, _step_sequence
     
-    _ensure_model_loaded()
+    # Engine should already be loaded before LE-0 starts
+    # Only check if somehow not loaded (safety check, should not happen)
+    if _llm is None:
+        _ensure_model_loaded()
     
     # Determine current flow index based on step sequence BEFORE appending current step
     # Each flow has 3 steps: planner, executor, verifier
@@ -316,6 +350,9 @@ def run(step_name: str, **kwargs) -> bytes:
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         
+        # Calculate end time
+        end_time = time.time()
+        
         # Extract generated text and token counts
         if outputs and outputs[0].outputs:
             output = outputs[0].outputs[0]
@@ -333,7 +370,7 @@ def run(step_name: str, **kwargs) -> bytes:
             decode_tokens = 0
         
         # Calculate latency (end time already synchronized)
-        latency_ms = (time.time() - start_time) * 1000
+        latency_ms = (end_time - start_time) * 1000
         
         # Count prompt tokens using tokenizer
         prompt_tokens = _count_tokens(prompt)

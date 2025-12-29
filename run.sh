@@ -183,9 +183,8 @@ PYTHON_SCRIPT
 # Helper function to run standalone mode
 run_standalone() {
     echo "vLLM Standalone"
-    log "Generating $NUM_FLOWS expanded flows from prompt suite..."
+    log "Expanding flows (with caching)..."
     ./venv/bin/python run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS"
-    log "Flows generated"
     log "Starting standalone execution ($NUM_FLOWS workflows)..."
     
     # Capture stderr to temp file for metrics, but also display it
@@ -217,10 +216,9 @@ run_standalone() {
 run_le0() {
     echo "vLLM+LE-0"
     
-    # Generate flows first (target needs them)
-    log "Generating $NUM_FLOWS expanded flows from prompt suite..."
+    # Expand flows first (target needs them, uses caching)
+    log "Expanding flows (with caching)..."
     ./venv/bin/python run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS"
-    log "Flows generated"
     
     log "Starting LE-0 execution ($NUM_FLOWS workflows)..."
     

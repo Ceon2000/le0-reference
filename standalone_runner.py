@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
 Standalone runner that executes multiple workflows sequentially.
+Pre-loads vLLM engine once before all workflows to avoid repeated initialization.
 """
 
 import json
 import os
 import sys
+import time
 from pathlib import Path
-from target_vllm import run_prompt
+from target_vllm import run_prompt, _ensure_model_loaded
 
 
 def execute_one_workflow(flow_file: str, flow_idx: int) -> None:
@@ -49,12 +51,22 @@ def execute_one_workflow(flow_file: str, flow_idx: int) -> None:
 def execute_standalone(num_flows: int = 25) -> None:
     """
     Execute multiple workflows sequentially.
+    Pre-loads vLLM engine once before all workflows.
     
     Args:
         num_flows: Number of workflows to execute (1-25)
     """
     num_flows = min(max(1, num_flows), 25)  # Clamp to 1-25
     
+    # Timing: benchmark start
+    benchmark_start_time = time.time()
+    
+    # Pre-load engine once before all workflows
+    # Timing is logged inside _ensure_model_loaded() (only once)
+    _ensure_model_loaded()
+    
+    # Execute all workflows
+    workflow_times = []
     for i in range(1, num_flows + 1):
         flow_file = f"flows/_expanded_{i:02d}.json"
         
@@ -62,7 +74,16 @@ def execute_standalone(num_flows: int = 25) -> None:
             print(f"[PROGRESS] Warning: Flow file {flow_file} not found, skipping", file=sys.stderr)
             continue
         
+        workflow_start = time.time()
         execute_one_workflow(flow_file, i)
+        workflow_time = time.time() - workflow_start
+        workflow_times.append(workflow_time)
+        print(f"[TIMING] workflow_{i}_ms={workflow_time * 1000:.2f}", file=sys.stderr)
+    
+    # Timing: benchmark end
+    benchmark_total_time = time.time() - benchmark_start_time
+    print(f"[TIMING] benchmark_total_ms={benchmark_total_time * 1000:.2f}", file=sys.stderr)
+    print(f"[TIMING] avg_workflow_ms={sum(workflow_times) / len(workflow_times) * 1000:.2f}" if workflow_times else "[TIMING] avg_workflow_ms=0.00", file=sys.stderr)
 
 
 if __name__ == "__main__":
