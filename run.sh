@@ -332,6 +332,9 @@ elif [ "$MODE" = "both" ]; then
         else
             standalone_avg_latency="0.0"
         fi
+        # Calculate standalone prefill/reused averages
+        standalone_avg_prefill=$((standalone_prefill / standalone_steps))
+        standalone_avg_reused=$((standalone_reused / standalone_steps))
         
         le0_avg_input=$((le0_prompt / le0_steps))
         le0_avg_output=$((le0_decode / le0_steps))
@@ -425,9 +428,9 @@ elif [ "$MODE" = "both" ]; then
         printf "%-60s %20s %20s\n" "Avg Input Tokens" "$standalone_avg_input" "$le0_avg_input" >&2
         printf "%-60s %20s %20s\n" "Avg Output Tokens" "$standalone_avg_output" "$le0_avg_output" >&2
         printf "%-60s %20s %20s\n" "Avg Total Tokens" "$standalone_avg_total" "$le0_avg_total" >&2
-        printf "%-60s %20s %20s\n" "Avg Prefill Tokens" "$standalone_avg_input" "$le0_avg_prefill" >&2
-        printf "%-60s %20s %20s\n" "Avg Reused Tokens" "0" "$le0_avg_reused" >&2
-        printf "%-60s %20s %20s\n" "Avg Avoided Prefill" "$standalone_avg_input" "$le0_avg_avoided_prefill" >&2
+        printf "%-60s %20s %20s\n" "Avg Prefill Tokens" "$standalone_avg_prefill" "$le0_avg_prefill" >&2
+        printf "%-60s %20s %20s\n" "Avg Reused Tokens" "$standalone_avg_reused" "$le0_avg_reused" >&2
+        printf "%-60s %20s %20s\n" "Avg Avoided Prefill" "0" "$le0_avg_avoided_prefill" >&2
         printf "%-60s %20s %20s\n" "Avoided Prefill Ratio" "0.0%" "${le0_avoided_ratio}%" >&2
         echo "------------------------------------------------------------------------------------------" >&2
         printf "%-60s %20s %20s\n" "Avg Latency (ms)" "${standalone_avg_latency}" "${le0_avg_latency}" >&2
