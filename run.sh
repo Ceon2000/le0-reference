@@ -70,18 +70,23 @@ else
     PIP_QUIET_FLAG=""
 fi
 
-# Create virtual environment
-log "Creating virtual environment..."
-python3 -m venv venv > /dev/null 2>&1
-source venv/bin/activate
-log "Virtual environment activated"
+# Create virtual environment (skip if REUSE_VENV=1 and venv exists)
+if [ "${REUSE_VENV:-0}" = "1" ] && [ -d "venv" ] && [ -f "venv/bin/python" ]; then
+    log "Reusing existing virtual environment..."
+    source venv/bin/activate
+else
+    log "Creating virtual environment..."
+    python3 -m venv venv > /dev/null 2>&1
+    source venv/bin/activate
+    log "Virtual environment activated"
 
-# Install requirements
-if [ "${QUIET:-0}" != "1" ]; then
-    echo "[PROGRESS] Installing python deps (this may take a few minutes)" >&2
+    # Install requirements
+    if [ "${QUIET:-0}" != "1" ]; then
+        echo "[PROGRESS] Installing python deps (this may take a few minutes)" >&2
+    fi
+    ./venv/bin/pip install $PIP_QUIET_FLAG -r requirements.txt
+    log "Requirements installed"
 fi
-./venv/bin/pip install $PIP_QUIET_FLAG -r requirements.txt
-log "Requirements installed"
 
 # Install LE-0 wheel for modes that need it
 if [ "$MODE" = "le0" ] || [ "$MODE" = "both" ]; then
