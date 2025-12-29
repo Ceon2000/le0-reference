@@ -61,6 +61,13 @@ export HF_HUB_DISABLE_PROGRESS_BARS=1
 export HF_HUB_DISABLE_EXPERIMENTAL_WARNING=1
 export PYTHONWARNINGS=ignore
 
+# vLLM worker process control - ensure proper spawn handling
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+export WORLD_SIZE=1
+export RANK=0
+export LOCAL_RANK=0
+
 # Configure pip progress bar based on QUIET
 if [ "${QUIET:-0}" = "1" ]; then
     export PIP_PROGRESS_BAR=off

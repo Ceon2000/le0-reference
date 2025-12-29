@@ -65,6 +65,9 @@ def execute_standalone(num_flows: int = 25) -> None:
     # Timing is logged inside _ensure_model_loaded() (only once)
     _ensure_model_loaded()
     
+    # Log workflow loop start with PID for lifecycle verification
+    print(f"[RUNNER] WORKFLOW_LOOP_START pid={os.getpid()}", file=sys.stderr)
+    
     # Execute all workflows
     workflow_times = []
     for i in range(1, num_flows + 1):
@@ -73,6 +76,9 @@ def execute_standalone(num_flows: int = 25) -> None:
         if not os.path.exists(flow_file):
             print(f"[PROGRESS] Warning: Flow file {flow_file} not found, skipping", file=sys.stderr)
             continue
+        
+        # Log each workflow start with PID
+        print(f"[RUNNER] WORKFLOW_{i}_START pid={os.getpid()}", file=sys.stderr)
         
         workflow_start = time.time()
         execute_one_workflow(flow_file, i)

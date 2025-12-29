@@ -12,8 +12,19 @@ import logging
 import json
 import warnings
 import contextlib
+import atexit
 from pathlib import Path
 from typing import Optional, Dict, Any
+
+# =============================================================================
+# CRITICAL: Set vLLM environment variables BEFORE importing vLLM
+# These control worker spawn method and distributed initialization
+# =============================================================================
+os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")  # Proper fork handling
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")  # Single GPU
+os.environ.setdefault("WORLD_SIZE", "1")  # No distributed
+os.environ.setdefault("RANK", "0")
+os.environ.setdefault("LOCAL_RANK", "0")
 
 # Suppress vLLM and torch internal logs before importing
 logging.getLogger("vllm").setLevel(logging.ERROR)
@@ -44,6 +55,9 @@ try:
 except ImportError:
     print("[TARGET] ERROR: vLLM not installed. Install with: pip install vllm", file=sys.stderr)
     sys.exit(1)
+
+# Log process start for lifecycle instrumentation
+print(f"[TARGET] PROCESS_START pid={os.getpid()}", file=sys.stderr)
 
 # Global model and tokenizer (loaded once, reused across steps)
 _llm: Optional[LLM] = None
@@ -441,6 +455,22 @@ def init() -> None:
     Prints ENGINE_CREATED with PID for verification.
     """
     _ensure_model_loaded()
+
+
+def _cleanup_engine():
+    """Graceful cleanup of vLLM engine to prevent worker crash messages."""
+    global _llm
+    if _llm is not None:
+        try:
+            # Give workers time to shutdown gracefully
+            time.sleep(0.5)
+            _llm = None
+            print(f"[TARGET] ENGINE_SHUTDOWN pid={os.getpid()}", file=sys.stderr)
+        except Exception:
+            pass  # Suppress any cleanup errors
+
+# Register cleanup handler for graceful exit
+atexit.register(_cleanup_engine)
 
 
 # Eager initialization: pre-load engine at module import if LE0_EAGER_INIT=1
