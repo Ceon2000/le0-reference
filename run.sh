@@ -356,6 +356,8 @@ elif [ "$MODE" = "both" ]; then
         # Parse 8 fields: prompt decode latency prefill reused steps power energy
         read -r standalone_prompt standalone_decode standalone_latency standalone_prefill standalone_reused standalone_steps standalone_power standalone_energy <<< "$STANDALONE_METRICS"
         read -r le0_prompt le0_decode le0_latency le0_prefill le0_reused le0_steps le0_power le0_energy <<< "$LE0_METRICS"
+        echo "[DEBUG] Parsed: standalone_latency=$standalone_latency standalone_steps=$standalone_steps standalone_power=$standalone_power standalone_energy=$standalone_energy" >&2
+        echo "[DEBUG] Parsed: le0_latency=$le0_latency le0_steps=$le0_steps le0_power=$le0_power le0_energy=$le0_energy" >&2
         
         # Validation: check that we actually captured metrics
         if [ "$standalone_steps" = "0" ] || [ -z "$standalone_steps" ]; then
