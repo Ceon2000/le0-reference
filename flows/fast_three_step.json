@@ -1,0 +1,17 @@
+{
+    "input": "Task ID: {{TASK_ID}}. Analyze the following code and identify any potential issues.",
+    "steps": [
+        {
+            "name": "planner",
+            "instruction": "Plan your approach to analyze the code for task {{TASK_ID}}. Consider: correctness, edge cases, performance."
+        },
+        {
+            "name": "executor",
+            "instruction": "Execute the analysis plan for task {{TASK_ID}}. Identify specific bugs or improvements."
+        },
+        {
+            "name": "verifier",
+            "instruction": "Verify the findings for task {{TASK_ID}} and provide a concise summary."
+        }
+    ]
+}

@@ -207,6 +207,99 @@ def build_multiple_flows(flow_file: str, num_flows: int = 25) -> None:
     _progress("All flows generated")
 
 
+def build_fast_flows(flow_file: str, num_flows: int = 25) -> None:
+    """
+    Build lightweight flows for fast testing.
+    Each flow has unique ID to prevent prefix caching but minimal prompt size.
+    
+    Args:
+        flow_file: Path to input flow JSON file (template)
+        num_flows: Number of workflows to generate (1-25)
+    """
+    import uuid
+    
+    num_flows = min(max(1, num_flows), 25)
+    
+    # Load template flow
+    _progress("Loading flow template...")
+    with open(flow_file, "r") as f:
+        template = json.load(f)
+    
+    expand_start_time = time.time()
+    
+    # Sample code snippets for variety (all short)
+    code_snippets = [
+        '''def process_items(items):
+    result = []
+    for i in range(len(items)):
+        if items[i] > 0:
+            result.append(items[i] * 2)
+    return result''',
+        '''def find_max(numbers):
+    if not numbers:
+        return None
+    max_val = numbers[0]
+    for n in numbers:
+        if n > max_val:
+            max_val = n
+    return max_val''',
+        '''class DataStore:
+    def __init__(self):
+        self.data = {}
+    def get(self, key):
+        return self.data[key]
+    def set(self, key, value):
+        self.data[key] = value''',
+        '''async def fetch_data(url):
+    response = await http_get(url)
+    if response.status != 200:
+        raise Error("Failed")
+    return response.json()''',
+        '''def validate_email(email):
+    if "@" not in email:
+        return False
+    parts = email.split("@")
+    return len(parts) == 2 and len(parts[1]) > 0'''
+    ]
+    
+    _progress(f"Generating {num_flows} fast flows...")
+    
+    for i in range(1, num_flows + 1):
+        # Generate unique task ID
+        task_id = f"{uuid.uuid4().hex[:8]}_{i:02d}"
+        
+        # Select code snippet (cycle through)
+        snippet = code_snippets[(i - 1) % len(code_snippets)]
+        
+        # Build lightweight input (~200-300 tokens)
+        flow_input = f"""Task ID: {task_id}
+
+Analyze this code and identify any issues:
+
+```python
+{snippet}
+```
+
+Consider: correctness, edge cases, performance, readability.
+Focus on practical improvements that would help in production."""
+        
+        # Create flow with unique input
+        flow = {
+            "input": flow_input,
+            "steps": template.get("steps", [])
+        }
+        
+        # Write expanded flow
+        output_file = f"flows/_expanded_{i:02d}.json"
+        with open(output_file, "w") as f:
+            json.dump(flow, f, indent=2)
+    
+    expand_time = time.time() - expand_start_time
+    print(f"[TIMING] flow_expansion_ms={expand_time * 1000:.2f} (fast mode)", file=sys.stderr)
+    print(f"[INPUT] fixture_bytes=0 fixture_files=0", file=sys.stderr)
+    _progress("All fast flows generated")
+
+
 if __name__ == "__main__":
     import argparse
     
@@ -214,10 +307,14 @@ if __name__ == "__main__":
     parser.add_argument("input_flow", help="Path to input flow JSON file")
     parser.add_argument("output_flow", nargs="?", help="Path to output expanded flow JSON file (optional if --num-flows used)")
     parser.add_argument("--num-flows", type=int, default=None, help="Generate multiple flows (1-25)")
+    parser.add_argument("--fast", action="store_true", help="Use fast mode with lightweight prompts")
     args = parser.parse_args()
     
     if args.num_flows:
-        build_multiple_flows(args.input_flow, args.num_flows)
+        if args.fast:
+            build_fast_flows(args.input_flow, args.num_flows)
+        else:
+            build_multiple_flows(args.input_flow, args.num_flows)
     else:
         if not args.output_flow:
             print("ERROR: output_flow required when --num-flows not specified", file=sys.stderr)
