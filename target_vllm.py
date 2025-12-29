@@ -49,6 +49,27 @@ def _progress(msg: str) -> None:
     if os.environ.get("QUIET", "0") != "1":
         print(f"[PROGRESS] {msg}", file=sys.stderr)
 
+
+def _get_gpu_power_watts() -> float:
+    """
+    Get current GPU power draw in watts using nvidia-smi.
+    Falls back to GPU_POWER env var or default 140W if not available.
+    """
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=power.draw", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2
+        )
+        if result.returncode == 0:
+            power_str = result.stdout.strip().split('\n')[0]
+            return float(power_str)
+    except Exception:
+        pass
+    # Fallback to env var or default
+    return float(os.environ.get("GPU_POWER", "140.0"))
+
+
 try:
     from vllm import LLM, SamplingParams
     import torch
@@ -271,11 +292,16 @@ def run_prompt(prompt: str, step_name: str, max_tokens: int = 1024, temperature:
         # Convert to bytes
         output_bytes = generated_text.encode('utf-8')
         
+        # Get GPU power and calculate energy
+        power_w = _get_gpu_power_watts()
+        energy_j = power_w * (latency_ms / 1000.0)
+        
         # Print metrics to stderr (IP-safe: no text output)
         print(
             f"[TARGET] flow=0 step={step_name} latency_ms={latency_ms:.2f} "
             f"prompt_tokens={prompt_tokens} decode_tokens={decode_tokens} "
-            f"prefill_tokens={prefill_tokens} reused_tokens={reused_tokens}",
+            f"prefill_tokens={prefill_tokens} reused_tokens={reused_tokens} "
+            f"power_w={power_w:.2f} energy_j={energy_j:.2f}",
             file=sys.stderr
         )
         
@@ -433,11 +459,16 @@ def run(step_name: str, **kwargs) -> bytes:
         # Convert to bytes
         output_bytes = generated_text.encode('utf-8')
         
+        # Get GPU power and calculate energy
+        power_w = _get_gpu_power_watts()
+        energy_j = power_w * (latency_ms / 1000.0)
+        
         # Print metrics to stderr (IP-safe: no text output)
         print(
             f"[TARGET] flow={current_flow_idx + 1} step={step_name} latency_ms={latency_ms:.2f} "
             f"prompt_tokens={prompt_tokens} decode_tokens={decode_tokens} "
-            f"prefill_tokens={prefill_tokens} reused_tokens={reused_tokens}",
+            f"prefill_tokens={prefill_tokens} reused_tokens={reused_tokens} "
+            f"power_w={power_w:.2f} energy_j={energy_j:.2f}",
             file=sys.stderr
         )
         

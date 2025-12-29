@@ -35,6 +35,34 @@ if [ "$MODE" = "both" ] && [ -z "${LE0_WHEEL:-}" ]; then
     exit 1
 fi
 
+# GPU clock locking for reproducible benchmarks
+# Call with LOCK_GPU_CLOCKS=1 to enable (requires sudo)
+lock_gpu_clocks() {
+    if [ "${LOCK_GPU_CLOCKS:-0}" = "1" ]; then
+        if command -v nvidia-smi >/dev/null 2>&1; then
+            # Try to lock GPU clocks (requires sudo)
+            if sudo -n nvidia-smi -pm 1 2>/dev/null && \
+               sudo -n nvidia-smi -lgc 1410,1410 2>/dev/null; then
+                echo "[GPU] Clocks locked to 1410 MHz for reproducible benchmarks" >&2
+            else
+                echo "[GPU] Warning: Could not lock GPU clocks (no sudo). Results may vary." >&2
+            fi
+        fi
+    fi
+}
+
+reset_gpu_clocks() {
+    if [ "${LOCK_GPU_CLOCKS:-0}" = "1" ]; then
+        if command -v nvidia-smi >/dev/null 2>&1; then
+            sudo -n nvidia-smi -rgc 2>/dev/null || true
+            echo "[GPU] Clocks reset to default" >&2
+        fi
+    fi
+}
+
+# Lock clocks at startup if requested
+lock_gpu_clocks
+
 # Print banner (exact format required) - goes to stdout
 if [ "$MODE" = "standalone" ]; then
     echo "vLLM Standalone"
@@ -163,10 +191,13 @@ decode_tokens_total = 0
 latency_ms_total = 0.0
 prefill_tokens_total = 0
 reused_tokens_total = 0
+power_w_total = 0.0
+energy_j_total = 0.0
 count_steps = 0
 
-# Match [TARGET] lines from stderr with prefill/reused tokens
-pattern = r'\[TARGET\] flow=\d+ step=\S+ latency_ms=([0-9.]+) prompt_tokens=([0-9]+) decode_tokens=([0-9]+) prefill_tokens=([0-9]+) reused_tokens=([0-9]+)'
+# Match [TARGET] lines with all metrics including power_w and energy_j
+# Pattern is flexible - power_w/energy_j may or may not be present
+pattern = r'\[TARGET\] flow=\d+ step=\S+ latency_ms=([0-9.]+) prompt_tokens=([0-9]+) decode_tokens=([0-9]+) prefill_tokens=([0-9]+) reused_tokens=([0-9]+)(?:\s+power_w=([0-9.]+))?(?:\s+energy_j=([0-9.]+))?'
 
 try:
     with open(sys.argv[1], 'r') as f:
@@ -178,17 +209,22 @@ try:
                 decode_tokens = int(match.group(3))
                 prefill_tokens = int(match.group(4))
                 reused_tokens = int(match.group(5))
+                power_w = float(match.group(6)) if match.group(6) else 0.0
+                energy_j = float(match.group(7)) if match.group(7) else 0.0
                 latency_ms_total += latency_ms
                 prompt_tokens_total += prompt_tokens
                 decode_tokens_total += decode_tokens
                 prefill_tokens_total += prefill_tokens
                 reused_tokens_total += reused_tokens
+                power_w_total += power_w
+                energy_j_total += energy_j
                 count_steps += 1
 except Exception as e:
     sys.stderr.write(f"Error reading metrics: {e}\n")
     sys.exit(1)
 
-print(f"{prompt_tokens_total} {decode_tokens_total} {latency_ms_total:.2f} {prefill_tokens_total} {reused_tokens_total} {count_steps}")
+# Output: prompt decode latency prefill reused steps power energy
+print(f"{prompt_tokens_total} {decode_tokens_total} {latency_ms_total:.2f} {prefill_tokens_total} {reused_tokens_total} {count_steps} {power_w_total:.2f} {energy_j_total:.2f}")
 PYTHON_SCRIPT
 }
 
@@ -315,8 +351,19 @@ elif [ "$MODE" = "both" ]; then
     
     # Print comparison summary in table format
     if [ -n "$STANDALONE_METRICS" ] && [ -n "$LE0_METRICS" ]; then
-        read -r standalone_prompt standalone_decode standalone_latency standalone_prefill standalone_reused standalone_steps <<< "$STANDALONE_METRICS"
-        read -r le0_prompt le0_decode le0_latency le0_prefill le0_reused le0_steps <<< "$LE0_METRICS"
+        # Parse 8 fields: prompt decode latency prefill reused steps power energy
+        read -r standalone_prompt standalone_decode standalone_latency standalone_prefill standalone_reused standalone_steps standalone_power standalone_energy <<< "$STANDALONE_METRICS"
+        read -r le0_prompt le0_decode le0_latency le0_prefill le0_reused le0_steps le0_power le0_energy <<< "$LE0_METRICS"
+        
+        # Validation: check that we actually captured metrics
+        if [ "$standalone_steps" = "0" ] || [ -z "$standalone_steps" ]; then
+            echo "[ERROR] No standalone [TARGET] lines captured. Check temp file capture." >&2
+            return 1
+        fi
+        if [ "$le0_steps" = "0" ] || [ -z "$le0_steps" ]; then
+            echo "[ERROR] No LE-0 [TARGET] lines captured. Check temp file capture." >&2
+            return 1
+        fi
         
         # Calculate averages
         standalone_avg_input=$((standalone_prompt / standalone_steps))
@@ -359,19 +406,23 @@ elif [ "$MODE" = "both" ]; then
             le0_avg_latency="0.0"
         fi
         
-        # Get GPU power (W) for energy calculations
-        gpu_power=$(get_gpu_power)
+        # Get GPU power (W) for display (average from captured)
+        # Use captured energy values directly (already in Joules)
+        # Convert to kJ for display
+        standalone_energy_kj=$(python_calc "$standalone_energy / 1000.0")
+        le0_energy_kj=$(python_calc "$le0_energy / 1000.0")
         
-        # Calculate energy (kJ): Power (W) * Time (s) / 1000
-        # Total time in seconds = total_latency_ms / 1000
-        # Note: latency_ms is the SUM of all step latencies (actual GPU compute time)
-        # This correctly excludes overhead like model loading, setup, etc.
-        standalone_total_time_s=$(python_calc "$standalone_latency / 1000.0")
-        le0_total_time_s=$(python_calc "$le0_latency / 1000.0")
-        # Energy = Power (W) × Time (s) / 1000 to convert to kJ
-        # Example: 123W × 1800s / 1000 = 221.4 kJ for a 30-minute run
-        standalone_energy_kj=$(python_calc "$gpu_power * $standalone_total_time_s / 1000.0")
-        le0_energy_kj=$(python_calc "$gpu_power * $le0_total_time_s / 1000.0")
+        # Get average power per step for display
+        if [ "$standalone_steps" -gt 0 ]; then
+            standalone_avg_power=$(python_calc "$standalone_power / $standalone_steps")
+        else
+            standalone_avg_power="0.0"
+        fi
+        if [ "$le0_steps" -gt 0 ]; then
+            le0_avg_power=$(python_calc "$le0_power / $le0_steps")
+        else
+            le0_avg_power="0.0"
+        fi
         
         # Calculate tokens/joule: Total tokens / Energy (kJ)
         # This measures efficiency: how many tokens processed per kilojoule of energy
@@ -435,7 +486,7 @@ elif [ "$MODE" = "both" ]; then
         echo "------------------------------------------------------------------------------------------" >&2
         printf "%-60s %20s %20s\n" "Avg Latency (ms)" "${standalone_avg_latency}" "${le0_avg_latency}" >&2
         echo "------------------------------------------------------------------------------------------" >&2
-        printf "%-60s %20s %20s\n" "Avg GPU Power (W)" "${gpu_power}" "${gpu_power}" >&2
+        printf "%-60s %20s %20s\n" "Avg GPU Power (W)" "${standalone_avg_power}" "${le0_avg_power}" >&2
         printf "%-60s %20s %20s\n" "Energy (kJ)" "${standalone_energy_kj}" "${le0_energy_kj}" >&2
         printf "%-60s %20s %20s\n" "Tokens/Joule" "${standalone_tokens_joule}" "${le0_tokens_joule}" >&2
         echo "==========================================================================================" >&2
