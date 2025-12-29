@@ -347,12 +347,17 @@ elif [ "$MODE" = "both" ]; then
         
         # Calculate energy (kJ): Power (W) * Time (s) / 1000
         # Total time in seconds = total_latency_ms / 1000
+        # Note: latency_ms is the SUM of all step latencies (actual GPU compute time)
+        # This correctly excludes overhead like model loading, setup, etc.
         standalone_total_time_s=$(python_calc "$standalone_latency / 1000.0")
         le0_total_time_s=$(python_calc "$le0_latency / 1000.0")
+        # Energy = Power (W) × Time (s) / 1000 to convert to kJ
+        # Example: 123W × 1800s / 1000 = 221.4 kJ for a 30-minute run
         standalone_energy_kj=$(python_calc "$gpu_power * $standalone_total_time_s / 1000.0")
         le0_energy_kj=$(python_calc "$gpu_power * $le0_total_time_s / 1000.0")
         
         # Calculate tokens/joule: Total tokens / Energy (kJ)
+        # This measures efficiency: how many tokens processed per kilojoule of energy
         standalone_total_tokens=$((standalone_prompt + standalone_decode))
         le0_total_tokens=$((le0_prompt + le0_decode))
         # Check if energy > 0 using Python comparison
@@ -374,10 +379,22 @@ elif [ "$MODE" = "both" ]; then
         token_delta_pct=$(python_calc "$token_delta * 100 / $standalone_avg_total" 2>/dev/null || echo "0.0")
         latency_delta=$(python_calc "$le0_avg_latency - $standalone_avg_latency" 2>/dev/null || echo "0.0")
         latency_delta_pct=$(python_calc "$latency_delta * 100 / $standalone_avg_latency" 2>/dev/null || echo "0.0")
+        # Calculate energy delta: negative means energy saved (good)
         energy_delta=$(python_calc "$le0_energy_kj - $standalone_energy_kj" 2>/dev/null || echo "0.0")
-        energy_delta_pct=$(python_calc "$energy_delta * 100 / $standalone_energy_kj" 2>/dev/null || echo "0.0")
+        # Percentage change: negative means percentage reduction in energy
+        if [ "$(python_calc "$standalone_energy_kj > 0")" = "1" ]; then
+            energy_delta_pct=$(python_calc "$energy_delta * 100.0 / $standalone_energy_kj" 2>/dev/null || echo "0.0")
+        else
+            energy_delta_pct="0.0"
+        fi
+        # Tokens/joule delta: positive means more efficient (good)
         tokens_joule_delta=$(python_calc "$le0_tokens_joule - $standalone_tokens_joule" 2>/dev/null || echo "0.0")
-        tokens_joule_delta_pct=$(python_calc "$tokens_joule_delta * 100 / $standalone_tokens_joule" 2>/dev/null || echo "0.0")
+        # Percentage change: positive means percentage improvement in efficiency
+        if [ "$(python_calc "$standalone_tokens_joule > 0")" = "1" ]; then
+            tokens_joule_delta_pct=$(python_calc "$tokens_joule_delta * 100.0 / $standalone_tokens_joule" 2>/dev/null || echo "0.0")
+        else
+            tokens_joule_delta_pct="0.0"
+        fi
         
         # Print clean comparison table (to stderr, no [PROGRESS] prefix)
         echo "" >&2
