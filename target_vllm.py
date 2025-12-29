@@ -161,6 +161,7 @@ def _ensure_model_loaded():
         if not _engine_init_timing_logged:
             engine_init_time = time.time() - engine_init_start
             print(f"[TIMING] engine_init_ms={engine_init_time * 1000:.2f}", file=sys.stderr)
+            print(f"[TARGET] ENGINE_CREATED pid={os.getpid()}", file=sys.stderr)
             _engine_init_timing_logged = True
     except Exception as e:
         print(f"[TARGET] ERROR: Failed to load model '{current_model_id}': {e}", file=sys.stderr)
@@ -433,15 +434,41 @@ def run(step_name: str, **kwargs) -> bytes:
         raise
 
 
+def init() -> None:
+    """
+    Explicitly pre-load the vLLM engine.
+    Call this BEFORE starting workflows to ensure engine is ready.
+    Prints ENGINE_CREATED with PID for verification.
+    """
+    _ensure_model_loaded()
+
+
+# Eager initialization: pre-load engine at module import if LE0_EAGER_INIT=1
+# This ensures engine is ready before LE-0 starts calling run()
+if os.environ.get("LE0_EAGER_INIT") == "1":
+    init()
+
+
 if __name__ == "__main__":
-    # Smoke test when run directly
-    print("[TARGET] Running smoke test...", file=sys.stderr)
-    try:
-        result = run_prompt(
-            "Instruction: Say hello\n\nInput: test input",
-            "test_step"
-        )
-        print(f"[TARGET] Smoke test passed. Output length: {len(result)} bytes", file=sys.stderr)
-    except Exception as e:
-        print(f"[TARGET] Smoke test failed: {e}", file=sys.stderr)
-        sys.exit(1)
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="vLLM target for LE-0")
+    parser.add_argument("--init-only", action="store_true",
+                        help="Pre-load engine and exit (for testing)")
+    args, _ = parser.parse_known_args()
+    
+    if args.init_only:
+        init()
+        print("[TARGET] Engine ready, exiting", file=sys.stderr)
+    else:
+        # Smoke test when run directly
+        print("[TARGET] Running smoke test...", file=sys.stderr)
+        try:
+            result = run_prompt(
+                "Instruction: Say hello\n\nInput: test input",
+                "test_step"
+            )
+            print(f"[TARGET] Smoke test passed. Output length: {len(result)} bytes", file=sys.stderr)
+        except Exception as e:
+            print(f"[TARGET] Smoke test failed: {e}", file=sys.stderr)
+            sys.exit(1)

@@ -233,6 +233,10 @@ run_le0() {
     # Clear Python cache to ensure fresh code is used
     find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
     find . -name "*.pyc" -delete 2>/dev/null || true
+    
+    # Enable eager engine initialization - engine loads when target_vllm is imported
+    export LE0_EAGER_INIT=1
+    
     # Run LE-0: stdout (hash-only) goes to console, stderr (metrics) goes to temp file
     if "$LE0_CMD" --num_flows "$NUM_FLOWS" > "$temp_stdout" 2> "$temp_stderr"; then
         log "LE-0 execution completed"
