@@ -52,15 +52,6 @@ export MODEL="${MODEL:-allenai/Olmo-3-7B-Think}"
 # Can be overridden with GPU_POWER env var, or will try nvidia-smi
 export GPU_POWER="${GPU_POWER:-140.0}"
 
-# Fast mode: use lightweight prompts (~200 tokens) instead of full fixtures (~12k tokens)
-# Set FAST_MODE=1 to enable fast benchmarks (5 min instead of 2 hours)
-if [ "${FAST_MODE:-0}" = "1" ]; then
-    FAST_FLAG="--fast"
-    log "Fast mode enabled - using lightweight prompts"
-else
-    FAST_FLAG=""
-fi
-
 # Suppress vLLM and torch internal logs
 export VLLM_LOGGING_LEVEL=ERROR
 export TOKENIZERS_PARALLELISM=false
@@ -204,8 +195,8 @@ PYTHON_SCRIPT
 # Helper function to run standalone mode
 run_standalone() {
     echo "vLLM Standalone"
-    log "Expanding flows (with caching)..."
-    ./venv/bin/python run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS" $FAST_FLAG
+    log "Expanding flows..."
+    ./venv/bin/python run_flow.py --num-flows "$NUM_FLOWS"
     log "Starting standalone execution ($NUM_FLOWS workflows)..."
     
     # Capture stderr to temp file for metrics, but also display it
@@ -238,8 +229,8 @@ run_le0() {
     echo "vLLM+LE-0"
     
     # Expand flows first (target needs them, uses caching)
-    log "Expanding flows (with caching)..."
-    ./venv/bin/python run_flow.py flows/three_step.json --num-flows "$NUM_FLOWS" $FAST_FLAG
+    log "Expanding flows..."
+    ./venv/bin/python run_flow.py --num-flows "$NUM_FLOWS"
     
     log "Starting LE-0 execution ($NUM_FLOWS workflows)..."
     
