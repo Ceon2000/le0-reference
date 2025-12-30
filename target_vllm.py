@@ -94,6 +94,10 @@ _flows_cache: Dict[int, Dict] = {}
 # Token tracking for prefill/reused analysis
 _step_token_tracking: Dict[tuple, int] = {}  # (flow_idx, step_name) -> prompt_tokens
 
+# Context accumulation for fair tier comparison (LE-0 mode)
+# Each flow accumulates outputs from previous steps
+_flow_accumulated_context: Dict[int, str] = {}  # flow_idx -> accumulated context string
+
 
 def _get_model_id() -> str:
     """Get model ID from environment or default."""
@@ -363,12 +367,23 @@ def run(step_name: str, **kwargs) -> bytes:
     # Get step instruction
     instruction = step.get("instruction", "")
     
-    # Build prompt: instruction + input
+    # Get accumulated context from previous steps in this flow
+    accumulated_context = _flow_accumulated_context.get(current_flow_idx, "")
+    
+    # Build prompt: accumulated context + instruction + input (mirror standalone_runner.py)
     prompt_parts = []
+    
+    # Add accumulated context first (previous step outputs)
+    if accumulated_context:
+        prompt_parts.append(f"## Previous Analysis\n\n{accumulated_context}")
+    
+    # Add current step instruction
     if instruction:
-        prompt_parts.append(f"Instruction: {instruction}")
+        prompt_parts.append(f"## Current Task\n\n{instruction}")
+    
+    # Add original flow input (task description)
     if flow_input:
-        prompt_parts.append(f"Input: {flow_input}")
+        prompt_parts.append(f"## Original Request\n\n{flow_input}")
     
     prompt = "\n\n".join(prompt_parts) if prompt_parts else ""
     
@@ -466,6 +481,13 @@ def run(step_name: str, **kwargs) -> bytes:
             f"prefill_tokens={prefill_tokens} reused_tokens={reused_tokens} "
             f"power_w={power_w:.2f} energy_j={energy_j:.2f}",
             file=sys.stderr
+        )
+        
+        # Accumulate this step's output for subsequent steps in same flow
+        # This mirrors standalone_runner.py behavior for fair tier comparison
+        current_accumulated = _flow_accumulated_context.get(current_flow_idx, "")
+        _flow_accumulated_context[current_flow_idx] = (
+            current_accumulated + f"\n\n### {step_name.title()} Output\n\n{generated_text}"
         )
         
         return output_bytes
