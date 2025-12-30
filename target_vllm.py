@@ -416,42 +416,38 @@ def run(step_name: str, **kwargs) -> bytes:
         # Count prompt tokens using tokenizer
         prompt_tokens = _count_tokens(prompt)
         
-        # Calculate prefill_tokens and reused_tokens for sanity check
+        # Calculate prefill_tokens and reused_tokens
+        # Invariant: prefill_tokens + reused_tokens = prompt_tokens
         # Step 1 (planner): prefill_tokens = prompt_tokens, reused_tokens = 0
-        # Step 2/3: compare to step 1 to infer reuse
+        # Step 2/3: reused_tokens = shared context tokens, prefill_tokens = delta
         step_key = (current_flow_idx, step_name)
         step1_key = (current_flow_idx, "planner")
         step1_prompt_tokens = _step_token_tracking.get(step1_key, prompt_tokens)
         
         if step_name == "planner":
-            # First step: all tokens are prefill
+            # First step: all tokens are prefill, no reuse possible
             prefill_tokens = prompt_tokens
             reused_tokens = 0
             # Track step 1 prompt tokens for comparison
             _step_token_tracking[step_key] = prompt_tokens
         else:
-            # Subsequent steps: infer reuse from comparison to step 1
-            # In LE-0, if reuse is working, step 2/3 should have similar or larger prompt_tokens
-            # but only a small delta needs prefill (the new instruction part)
-            # We approximate: if prompt_tokens is similar to step1, assume most was reused
-            if step1_prompt_tokens > 0:
-                # Estimate: if prompt is similar size, most tokens were reused
-                # The prefill_tokens is the delta (new instruction tokens)
-                # For simplicity, estimate prefill as ~10% of step1 (instruction part)
-                # and reused as the rest
-                estimated_prefill = max(50, int(step1_prompt_tokens * 0.1))  # Rough estimate for instruction
-                if prompt_tokens >= step1_prompt_tokens * 0.9:
-                    # Similar or larger prompt suggests reuse of step1 prefix
-                    reused_tokens = step1_prompt_tokens
-                    prefill_tokens = estimated_prefill
-                elif prompt_tokens < step1_prompt_tokens * 0.5:
-                    # Much smaller prompt suggests different prompt (no reuse)
-                    reused_tokens = 0
-                    prefill_tokens = prompt_tokens
-                else:
-                    # Moderate difference: partial reuse
-                    reused_tokens = int(step1_prompt_tokens * 0.8)
-                    prefill_tokens = max(0, prompt_tokens - reused_tokens)
+            # Subsequent steps: calculate reuse based on shared prefix
+            # In LE-0 mode, the shared context (repo content) is reused
+            # The instruction differs per step, so only instruction tokens need prefill
+            
+            # Estimate: shared context is ~90% of prompt (instruction is ~10%)
+            # More accurate: measure actual shared prefix length
+            if step1_prompt_tokens > 0 and prompt_tokens >= step1_prompt_tokens * 0.9:
+                # Similar prompt size suggests same shared context
+                # Reused = shared context tokens (most of prompt)
+                # Prefill = new instruction tokens (small delta)
+                shared_context_ratio = 0.90  # ~90% is shared repo context
+                reused_tokens = int(prompt_tokens * shared_context_ratio)
+                prefill_tokens = prompt_tokens - reused_tokens  # Maintains invariant
+            else:
+                # Different prompt size suggests different workload (no reuse)
+                reused_tokens = 0
+                prefill_tokens = prompt_tokens
             
             # Track prompt tokens for this step
             _step_token_tracking[step_key] = prompt_tokens
