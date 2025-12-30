@@ -87,12 +87,16 @@ def run_treatment(num_tasks, tasks):
     
     for i in range(1, num_tasks + 1):
         lookups = execute_lookups(i)
-        new_count = sum(1 for l in lookups if not tracker.has_seen(l["snippet_id"]))
-        reused_tokens = sum(l["token_estimate"] for l in lookups if tracker.has_seen(l["snippet_id"]))
         task = {"client": 0, "output": 0, "latency": 0, "prefill_ms": 0, "decode_ms": 0}
         prior = []
+        task_avoided = 0
         
         for step in STEP_NAMES:
+            # Calculate avoided tokens BEFORE marking new ones as seen
+            # These are snippets already in tracker that we don't resend
+            step_avoided = sum(l["token_estimate"] for l in lookups if tracker.has_seen(l["snippet_id"]))
+            task_avoided += step_avoided
+            
             prompt = build_step_prompt_treatment(i, tasks[i-1], step, lookups, prior, tracker)
             task["client"] += count_tokens(prompt)
             out, metrics = run_prompt(prompt=prompt, step_name=step, flow_idx=i, temperature=0.7)
@@ -105,15 +109,17 @@ def run_treatment(num_tasks, tasks):
             totals["reused_tokens"] += metrics.get("reused_tokens", 0)
             totals["energy_j"] += metrics.get("energy_j", 0)
         
+        new_count = sum(1 for l in lookups if l["snippet_id"] in tracker.seen_ids)  # After processing
         totals["client_tokens"] += task["client"]
         totals["output_tokens"] += task["output"]
         totals["latency_ms"] += task["latency"]
         totals["prefill_ms"] += task["prefill_ms"]
         totals["decode_ms"] += task["decode_ms"]
-        total_avoided += reused_tokens * 3
+        total_avoided += task_avoided
         all_tasks.append({"task": i, "client_tokens": task["client"], "output_tokens": task["output"], 
-                         "new_snippets": new_count, "prefill_ms": task["prefill_ms"], "decode_ms": task["decode_ms"]})
-        print(f"  [TREATMENT] Task {i}: {task['client']:,} in, {task['output']} out, new={new_count}, seen={len(tracker.seen_ids)}", file=sys.stderr)
+                         "new_snippets": len(lookups) - new_count, "prefill_ms": task["prefill_ms"], "decode_ms": task["decode_ms"],
+                         "avoided_tokens": task_avoided})
+        print(f"  [TREATMENT] Task {i}: {task['client']:,} in, {task['output']} out, avoided={task_avoided:,}, seen={len(tracker.seen_ids)}", file=sys.stderr)
     
     return {
         "total_client_tokens": totals["client_tokens"],
