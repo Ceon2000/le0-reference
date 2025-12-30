@@ -227,16 +227,36 @@ def print_comparison(baseline, treatment, num_tasks, elapsed):
     # Diagnostic interpretation
     print(f"\n🔍 COMPUTE BOUNDARY DIAGNOSTIC", file=sys.stderr)
     print("-" * W, file=sys.stderr)
-    prefill_reduction_pct = ((baseline["total_prefill_ms"] - treatment["total_prefill_ms"]) / baseline["total_prefill_ms"] * 100) if baseline["total_prefill_ms"] > 0 else 0
-    token_reduction_pct = ((baseline["total_client_tokens"] - treatment["total_client_tokens"]) / baseline["total_client_tokens"] * 100) if baseline["total_client_tokens"] > 0 else 0
     
-    if abs(prefill_reduction_pct) < 5 and token_reduction_pct > 20:
-        print("  ⚠️  Token reduction WITHOUT prefill reduction suggests transmission-only savings", file=sys.stderr)
-        print("      LE-0 may not be providing compute-bound reuse (prefill avoidance)", file=sys.stderr)
-    elif prefill_reduction_pct > 10:
-        print("  ✅ Prefill reduction detected - suggests compute-bound reuse is working", file=sys.stderr)
+    token_reduction_pct = ((baseline["total_client_tokens"] - treatment["total_client_tokens"]) / baseline["total_client_tokens"] * 100) if baseline["total_client_tokens"] > 0 else 0
+    prefill_reduction_pct = ((baseline["total_prefill_ms"] - treatment["total_prefill_ms"]) / baseline["total_prefill_ms"] * 100) if baseline["total_prefill_ms"] > 0 else 0
+    
+    # Check if treatment has actual reuse (from LE-0 wheel metrics or snippet tracking)
+    treatment_reused = treatment.get('total_reused_tokens', 0)
+    avoided_tokens = treatment.get('total_avoided_tokens', 0)
+    
+    print(f"  Token Reduction:       {token_reduction_pct:.1f}%", file=sys.stderr)
+    print(f"  Prefill Time Reduction:{prefill_reduction_pct:.1f}%", file=sys.stderr)
+    print(f"  Snippet Avoided Tokens:{avoided_tokens:,}", file=sys.stderr)
+    print(f"  Reused Tokens (KV):    {treatment_reused:,} {'(N/A - not exposed by wheel)' if treatment_reused == 0 else ''}", file=sys.stderr)
+    print("-" * W, file=sys.stderr)
+    
+    # Interpret the results correctly
+    if treatment_reused > 0:
+        # Actual KV reuse detected
+        print("  ✅ KV Cache Reuse: reused_tokens > 0 indicates compute-bound savings", file=sys.stderr)
+    elif avoided_tokens > 0 and abs(prefill_reduction_pct - token_reduction_pct) < 10:
+        # Prefill reduction ~ token reduction → prompt shrink, not cache reuse
+        print("  📉 Prompt Shrink: prefill reduced proportionally to shorter prompts", file=sys.stderr)
+        print("      Savings from TRANSMISSION (smaller payloads), not COMPUTE reuse", file=sys.stderr)
+        print("      This is still a valid efficiency gain, but different from KV reuse", file=sys.stderr)
+    elif avoided_tokens > 0:
+        print("  📊 Mixed Signal: token reduction + prefill change not proportional", file=sys.stderr)
+        print("      Run prefill_dominant profile to isolate compute vs transmission", file=sys.stderr)
     else:
-        print("  ℹ️  Results inconclusive - try prefill_dominant profile for clearer signal", file=sys.stderr)
+        print("  ⚠️  No reuse detected (avoided_tokens=0, reused_tokens=0)", file=sys.stderr)
+        print("      Check snippet tracking or try prefill_dominant profile", file=sys.stderr)
+    
     print("=" * W, file=sys.stderr)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
