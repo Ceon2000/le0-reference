@@ -1,468 +1,243 @@
-# SWE-Style Benchmark Suite v1.0
-# Maps 25 audit prompts to objective, machine-checkable assertions
-# Compatible with both vLLM baseline and LE-0 treatment modes
+name: SWE-Bench-Style Pytest Suite
+version: "2.0"
+description: |
+  Behavioral test suite for helpdesk_ai following SWE-bench methodology.
+  Tests are designed to fail on current fixture code and pass after fixes.
 
-version: "1.0"
-description: "25-Task SWE-Bench-Style Evaluation Suite for helpdesk_ai"
-target_codebase: "fixtures/helpdesk_ai"
+target_codebase: fixtures/helpdesk_ai
 
 tasks:
-  - task_id: "T01"
-    prompt: "Analyze the ticket routing logic in router.py and identify any edge cases that could cause mis-routing."
+  - task_id: T01
+    prompt: "Analyze the ticket routing logic in router.py and identify edge cases that could cause mis-routing."
     files_in_scope:
-      - "src/helpdesk_ai/services/routing.py"
-      - "src/helpdesk_ai/domain/rules.py"
-    expected_outcomes:
-      type: "logic_fix"
-      assertions:
-        - description: "Router handles None category gracefully"
-          check_type: "pytest"
-          test_path: "test_generated/test_t01_routing.py::test_none_category_handling"
-        - description: "Router handles empty rule engine"
-          check_type: "pytest"
-          test_path: "test_generated/test_t01_routing.py::test_empty_rule_engine"
+      - src/helpdesk_ai/services/routing.py
+      - src/helpdesk_ai/domain/rules.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T01_routing_edge_cases.py
 
-  - task_id: "T02"
+  - task_id: T02
     prompt: "Review the priority scoring algorithm and verify the normalization calculations are mathematically correct."
     files_in_scope:
-      - "src/helpdesk_ai/domain/scoring.py"
-    expected_outcomes:
-      type: "correctness"
-      assertions:
-        - description: "Normalization avoids zero-division"
-          check_type: "pytest"
-          test_path: "test_generated/test_t02_scoring.py::test_zero_weight_normalization"
-        - description: "Empty weights handled safely"
-          check_type: "pytest"
-          test_path: "test_generated/test_t02_scoring.py::test_empty_weights_handling"
-        - description: "Normalized score in [0, 1] range"
-          check_type: "pytest"
-          test_path: "test_generated/test_t02_scoring.py::test_normalized_range"
+      - src/helpdesk_ai/domain/scoring.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T02_scoring_normalization.py
 
-  - task_id: "T03"
+  - task_id: T03
     prompt: "Examine the database connection handling in storage.py for potential connection leaks."
     files_in_scope:
-      - "src/helpdesk_ai/store/file_store.py"
-      - "src/helpdesk_ai/store/memory_store.py"
-    expected_outcomes:
-      type: "correctness"
-      assertions:
-        - description: "File handles are closed after operations"
-          check_type: "ast_check"
-          pattern: "with_statement_for_file_ops"
-        - description: "No open() without context manager"
-          check_type: "regex"
-          pattern: "(?<!with )open\\("
-          expect_match: false
+      - src/helpdesk_ai/store/memory_store.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T03_connection_leaks.py
 
-  - task_id: "T04"
+  - task_id: T04
     prompt: "Audit the input validation functions for SQL injection vulnerabilities."
     files_in_scope:
-      - "src/helpdesk_ai/ingest/validators.py"
-      - "src/helpdesk_ai/store/file_store.py"
-    expected_outcomes:
-      type: "security_fix"
-      assertions:
-        - description: "No string concatenation for queries"
-          check_type: "regex"
-          pattern: "f['\"].*\\{.*\\}.*(?:SELECT|INSERT|UPDATE|DELETE)"
-          expect_match: false
-        - description: "Input sanitization exists"
-          check_type: "pytest"
-          test_path: "test_generated/test_t04_validation.py::test_input_sanitization"
+      - src/helpdesk_ai/web/handlers.py
+      - src/helpdesk_ai/ingest/validators.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T04_input_validation.py
 
-  - task_id: "T05"
+  - task_id: T05
     prompt: "Trace the ticket lifecycle from creation to resolution and document state transitions."
     files_in_scope:
-      - "src/helpdesk_ai/domain/models.py"
-      - "src/helpdesk_ai/services/triage.py"
-    expected_outcomes:
-      type: "state_machine"
-      assertions:
-        - description: "Valid state transitions are enforced"
-          check_type: "pytest"
-          test_path: "test_generated/test_t05_lifecycle.py::test_valid_state_transitions"
-        - description: "Invalid transitions are rejected"
-          check_type: "pytest"
-          test_path: "test_generated/test_t05_lifecycle.py::test_invalid_state_rejection"
+      - src/helpdesk_ai/domain/models.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T05_ticket_lifecycle.py
 
-  - task_id: "T06"
+  - task_id: T06
     prompt: "Analyze the error handling patterns and identify any silent failures."
     files_in_scope:
-      - "src/helpdesk_ai/services/triage.py"
-      - "src/helpdesk_ai/services/routing.py"
-      - "src/helpdesk_ai/services/escalation.py"
-    expected_outcomes:
-      type: "observability"
-      assertions:
-        - description: "No bare except pass patterns"
-          check_type: "regex"
-          pattern: "except:\\s*pass"
-          expect_match: false
-        - description: "Exceptions have logging"
-          check_type: "ast_check"
-          pattern: "except_has_logging"
+      - src/helpdesk_ai/store/memory_store.py
+      - src/helpdesk_ai/config.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T06_silent_failures.py
 
-  - task_id: "T07"
+  - task_id: T07
     prompt: "Review the caching strategy and identify potential cache invalidation issues."
     files_in_scope:
-      - "src/helpdesk_ai/store/cache.py"
-    expected_outcomes:
-      type: "correctness"
-      assertions:
-        - description: "Cache TTL enforced"
-          check_type: "pytest"
-          test_path: "test_generated/test_t07_cache.py::test_ttl_expiration"
-        - description: "Stale entries cleaned up"
-          check_type: "pytest"
-          test_path: "test_generated/test_t07_cache.py::test_stale_cleanup"
+      - src/helpdesk_ai/store/cache.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T07_cache_invalidation.py
 
-  - task_id: "T08"
+  - task_id: T08
     prompt: "Examine the logging implementation for consistency and completeness."
     files_in_scope:
-      - "src/helpdesk_ai/services/audit.py"
-      - "src/helpdesk_ai/config.py"
-    expected_outcomes:
-      type: "observability"
-      assertions:
-        - description: "All service methods have entry logging"
-          check_type: "ast_check"
-          pattern: "method_has_logging"
-        - description: "Error paths log before raising"
-          check_type: "ast_check"
-          pattern: "error_path_logged"
+      - src/helpdesk_ai/services/routing.py
+      - src/helpdesk_ai/store/memory_store.py
+      - src/helpdesk_ai/services/escalation.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T08_logging_completeness.py
 
-  - task_id: "T09"
+  - task_id: T09
     prompt: "Analyze the configuration loading mechanism for security issues with sensitive values."
     files_in_scope:
-      - "src/helpdesk_ai/config.py"
-    expected_outcomes:
-      type: "config_safety"
-      assertions:
-        - description: "Secrets not logged in plaintext"
-          check_type: "regex"
-          pattern: "(password|secret|key|token).*print|log.*\\("
-          expect_match: false
-        - description: "Env vars used for secrets"
-          check_type: "pytest"
-          test_path: "test_generated/test_t09_config.py::test_secrets_from_env"
+      - src/helpdesk_ai/config.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T09_config_secrets.py
 
-  - task_id: "T10"
+  - task_id: T10
     prompt: "Review the API endpoint handlers for proper authentication checks."
     files_in_scope:
-      - "src/helpdesk_ai/web/handlers.py"
-      - "src/helpdesk_ai/web/app.py"
-    expected_outcomes:
-      type: "security_fix"
-      assertions:
-        - description: "Handlers check authentication"
-          check_type: "ast_check"
-          pattern: "handler_has_auth_check"
-        - description: "Unauthenticated requests rejected"
-          check_type: "pytest"
-          test_path: "test_generated/test_t10_auth.py::test_unauthenticated_rejected"
+      - src/helpdesk_ai/web/handlers.py
+      - src/helpdesk_ai/web/app.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T10_auth_checks.py
 
-  - task_id: "T11"
+  - task_id: T11
     prompt: "Examine the rate limiting implementation and identify bypass scenarios."
     files_in_scope:
-      - "src/helpdesk_ai/web/handlers.py"
-    expected_outcomes:
-      type: "security_fix"
-      assertions:
-        - description: "Rate limit enforced per client"
-          check_type: "pytest"
-          test_path: "test_generated/test_t11_ratelimit.py::test_rate_limit_per_client"
-        - description: "Distributed bypass prevented"
-          check_type: "pytest"
-          test_path: "test_generated/test_t11_ratelimit.py::test_no_bypass_with_headers"
+      - src/helpdesk_ai/web/handlers.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T11_rate_limiting.py
 
-  - task_id: "T12"
+  - task_id: T12
     prompt: "Analyze the ticket assignment algorithm for fairness across agents."
     files_in_scope:
-      - "src/helpdesk_ai/services/routing.py"
-      - "src/helpdesk_ai/services/triage.py"
-    expected_outcomes:
-      type: "correctness"
-      assertions:
-        - description: "Load balanced assignment"
-          check_type: "pytest"
-          test_path: "test_generated/test_t12_fairness.py::test_balanced_assignment"
-        - description: "No single agent overload"
-          check_type: "pytest"
-          test_path: "test_generated/test_t12_fairness.py::test_no_overload"
+      - src/helpdesk_ai/services/routing.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T12_assignment_fairness.py
 
-  - task_id: "T13"
+  - task_id: T13
     prompt: "Review the notification system for reliability and delivery guarantees."
     files_in_scope:
-      - "src/helpdesk_ai/services/escalation.py"
-    expected_outcomes:
-      type: "correctness"
-      assertions:
-        - description: "Notifications retry on failure"
-          check_type: "ast_check"
-          pattern: "has_retry_logic"
-        - description: "Failed notifications logged"
-          check_type: "pytest"
-          test_path: "test_generated/test_t13_notify.py::test_failure_logged"
+      - src/helpdesk_ai/services/escalation.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T13_T16_reliability.py
 
-  - task_id: "T14"
+  - task_id: T14
     prompt: "Examine the search functionality for performance issues with large datasets."
     files_in_scope:
-      - "src/helpdesk_ai/store/memory_store.py"
-      - "src/helpdesk_ai/store/file_store.py"
-    expected_outcomes:
-      type: "performance"
-      assertions:
-        - description: "Search uses indexed lookup"
-          check_type: "ast_check"
-          pattern: "dict_lookup_or_set"
-        - description: "No O(N^2) nested loops in search"
-          check_type: "ast_check"
-          pattern: "no_nested_for_loops"
+      - src/helpdesk_ai/store/memory_store.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T13_T16_reliability.py
 
-  - task_id: "T15"
+  - task_id: T15
     prompt: "Analyze the file attachment handling for security vulnerabilities."
     files_in_scope:
-      - "src/helpdesk_ai/ingest/parsers.py"
-      - "src/helpdesk_ai/ingest/validators.py"
-    expected_outcomes:
-      type: "security_fix"
-      assertions:
-        - description: "File paths sanitized"
-          check_type: "pytest"
-          test_path: "test_generated/test_t15_files.py::test_path_traversal_blocked"
-        - description: "File size limits enforced"
-          check_type: "pytest"
-          test_path: "test_generated/test_t15_files.py::test_size_limit_enforced"
+      - src/helpdesk_ai/store/file_store.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T13_T16_reliability.py
 
-  - task_id: "T16"
+  - task_id: T16
     prompt: "Review the session management implementation for security best practices."
     files_in_scope:
-      - "src/helpdesk_ai/web/app.py"
-      - "src/helpdesk_ai/web/handlers.py"
-    expected_outcomes:
-      type: "security_fix"
-      assertions:
-        - description: "Session tokens are random"
-          check_type: "pytest"
-          test_path: "test_generated/test_t16_session.py::test_token_entropy"
-        - description: "Session expiry enforced"
-          check_type: "pytest"
-          test_path: "test_generated/test_t16_session.py::test_session_expiry"
+      - src/helpdesk_ai/web/handlers.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T13_T16_reliability.py
 
-  - task_id: "T17"
+  - task_id: T17
     prompt: "Examine the audit logging for compliance requirements."
     files_in_scope:
-      - "src/helpdesk_ai/services/audit.py"
-    expected_outcomes:
-      type: "observability"
-      assertions:
-        - description: "All operations create audit records"
-          check_type: "pytest"
-          test_path: "test_generated/test_t17_audit.py::test_operations_audited"
-        - description: "Audit records include required fields"
-          check_type: "pytest"
-          test_path: "test_generated/test_t17_audit.py::test_audit_fields_complete"
+      - src/helpdesk_ai/services/audit.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T17_T20_compliance.py
 
-  - task_id: "T18"
+  - task_id: T18
     prompt: "Analyze the queue management for priority inversion issues."
     files_in_scope:
-      - "src/helpdesk_ai/services/triage.py"
-      - "src/helpdesk_ai/domain/scoring.py"
-    expected_outcomes:
-      type: "correctness"
-      assertions:
-        - description: "Higher priority processed first"
-          check_type: "pytest"
-          test_path: "test_generated/test_t18_queue.py::test_priority_ordering"
-        - description: "No starvation of low priority"
-          check_type: "pytest"
-          test_path: "test_generated/test_t18_queue.py::test_no_starvation"
+      - src/helpdesk_ai/services/escalation.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T17_T20_compliance.py
 
-  - task_id: "T19"
+  - task_id: T19
     prompt: "Review the escalation rules engine for correctness."
     files_in_scope:
-      - "src/helpdesk_ai/services/escalation.py"
-      - "src/helpdesk_ai/domain/rules.py"
-    expected_outcomes:
-      type: "correctness"
-      assertions:
-        - description: "Escalation triggers on SLA breach"
-          check_type: "pytest"
-          test_path: "test_generated/test_t19_escalation.py::test_sla_breach_escalation"
-        - description: "Escalation updates priority"
-          check_type: "pytest"
-          test_path: "test_generated/test_t19_escalation.py::test_priority_upgrade"
+      - src/helpdesk_ai/services/escalation.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T17_T20_compliance.py
 
-  - task_id: "T20"
+  - task_id: T20
     prompt: "Examine the SLA tracking calculations for timezone handling."
     files_in_scope:
-      - "src/helpdesk_ai/utils/time.py"
-      - "src/helpdesk_ai/services/escalation.py"
-    expected_outcomes:
-      type: "correctness"
-      assertions:
-        - description: "Datetime objects are timezone-aware"
-          check_type: "pytest"
-          test_path: "test_generated/test_t20_sla.py::test_timezone_awareness"
-        - description: "UTC conversion applied"
-          check_type: "regex"
-          pattern: "tzinfo|timezone|utc"
-          expect_match: true
+      - src/helpdesk_ai/domain/models.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T17_T20_compliance.py
 
-  - task_id: "T21"
+  - task_id: T21
     prompt: "Analyze the metrics collection for accuracy and completeness."
     files_in_scope:
-      - "src/helpdesk_ai/services/audit.py"
-      - "src/helpdesk_ai/services/triage.py"
-    expected_outcomes:
-      type: "observability"
-      assertions:
-        - description: "Timing metrics collected"
-          check_type: "ast_check"
-          pattern: "has_timing_instrumentation"
-        - description: "Counters incremented atomically"
-          check_type: "pytest"
-          test_path: "test_generated/test_t21_metrics.py::test_atomic_counters"
+      - src/helpdesk_ai/store/memory_store.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T21_T25_architecture.py
 
-  - task_id: "T22"
+  - task_id: T22
     prompt: "Review the backup and recovery procedures in the storage layer."
     files_in_scope:
-      - "src/helpdesk_ai/store/file_store.py"
-    expected_outcomes:
-      type: "correctness"
-      assertions:
-        - description: "Writes are atomic (temp file + rename)"
-          check_type: "ast_check"
-          pattern: "atomic_write_pattern"
-        - description: "Recovery from corrupted state"
-          check_type: "pytest"
-          test_path: "test_generated/test_t22_recovery.py::test_corrupted_file_recovery"
+      - src/helpdesk_ai/store/memory_store.py
+      - src/helpdesk_ai/store/file_store.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T21_T25_architecture.py
 
-  - task_id: "T23"
+  - task_id: T23
     prompt: "Examine the inter-service communication for error handling."
     files_in_scope:
-      - "src/helpdesk_ai/services/triage.py"
-      - "src/helpdesk_ai/services/routing.py"
-    expected_outcomes:
-      type: "correctness"
-      assertions:
-        - description: "Service calls handle exceptions"
-          check_type: "ast_check"
-          pattern: "try_except_around_service_calls"
-        - description: "Fallback on service failure"
-          check_type: "pytest"
-          test_path: "test_generated/test_t23_interservice.py::test_fallback_on_failure"
+      - src/helpdesk_ai/services/routing.py
+      - src/helpdesk_ai/services/escalation.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T21_T25_architecture.py
 
-  - task_id: "T24"
+  - task_id: T24
     prompt: "Analyze the user permission model for privilege escalation risks."
     files_in_scope:
-      - "src/helpdesk_ai/web/handlers.py"
-      - "src/helpdesk_ai/config.py"
-    expected_outcomes:
-      type: "security_fix"
-      assertions:
-        - description: "Permission checks before actions"
-          check_type: "ast_check"
-          pattern: "permission_check_before_mutation"
-        - description: "Cannot self-elevate permissions"
-          check_type: "pytest"
-          test_path: "test_generated/test_t24_permissions.py::test_no_self_elevation"
+      - src/helpdesk_ai/domain/models.py
+      - src/helpdesk_ai/web/handlers.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T21_T25_architecture.py
 
-  - task_id: "T25"
+  - task_id: T25
     prompt: "Review the overall system architecture for single points of failure."
     files_in_scope:
-      - "src/helpdesk_ai/cli.py"
-      - "src/helpdesk_ai/services/triage.py"
-    expected_outcomes:
-      type: "correctness"
-      assertions:
-        - description: "Storage has fallback"
-          check_type: "pytest"
-          test_path: "test_generated/test_t25_spof.py::test_storage_fallback"
-        - description: "Graceful degradation on component failure"
-          check_type: "pytest"
-          test_path: "test_generated/test_t25_spof.py::test_graceful_degradation"
+      - src/helpdesk_ai/config.py
+      - src/helpdesk_ai/store/memory_store.py
     scoring:
-      pass_if_all_true: true
-      weight: 1
-
-metadata:
-  total_tasks: 25
-  check_types:
-    pytest: "Run pytest test at specified path"
-    regex: "Match regex pattern in file (expect_match: true/false)"
-    ast_check: "AST-based structural check (pattern name)"
-  pass_criterion: "All assertions must pass for task to pass"
+      mode: pytest
+      test_nodeids:
+        - swe_style_eval/tests/test_T21_T25_architecture.py

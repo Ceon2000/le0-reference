@@ -1,0 +1,212 @@
+{
+  "suite": "tasks/swe_style_suite_25.yaml",
+  "timestamp": "2025-12-30T17:15:29.155894",
+  "total_tasks": 25,
+  "passed_tasks": [
+    "T01",
+    "T03",
+    "T06",
+    "T08",
+    "T09",
+    "T10",
+    "T11",
+    "T12",
+    "T13",
+    "T14",
+    "T15",
+    "T16",
+    "T17",
+    "T18",
+    "T19",
+    "T20"
+  ],
+  "failed_tasks": [
+    "T02",
+    "T04",
+    "T05",
+    "T07",
+    "T21",
+    "T22",
+    "T23",
+    "T24",
+    "T25"
+  ],
+  "pass_rate": 0.64,
+  "per_task": {
+    "T01": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 10 items\n\nswe_style_eval\\tests\\test_T01_routing_edge_cases.py ..........           [100%]\n\n============================= 10 passed in 0.19s ==============================",
+      "return_code": 0
+    },
+    "T02": {
+      "pass": false,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============\ncollected 7 items\n\nswe_style_eval\\tests\\test_T02_scoring_normalization.py ..F....           [100%]\n\n================================== FAILURES ===================================\n___________ TestScoringNormalization.test_normalized_score_in_range ___________\nswe_style_eval\\tests\\test_T02_scoring_normalization.py:38: in test_normalized_score_in_range\n    assert 0.0 <= score.normalized <= 1.0, f\"Normalized score {score.normalized} out of range\"\nE   AssertionError: Normalized score 7.5 out of range\nE   assert 7.5 <= 1.0\nE    +  where 7.5 = <[ValueError(\"Invalid format specifier '.2f if self.normalized else None' for object of type 'float'\") raised in repr()] Score object at 0x1a31aa38cd0>.normalized\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T02_scoring_normalization.py::TestScoringNormalization::test_normalized_score_in_range\n========================= 1 failed, 6 passed in 0.25s =========================",
+      "return_code": 1
+    },
+    "T03": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 5 items\n\nswe_style_eval\\tests\\test_T03_connection_leaks.py .....                  [100%]\n\n============================== 5 passed in 0.16s ==============================",
+      "return_code": 0
+    },
+    "T04": {
+      "pass": false,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "put_validation.py ...F.........          [100%]\n\n================================== FAILURES ===================================\n_ TestInputValidation.test_handler_sanitizes_malicious_input['; DROP TABLE tickets; --] _\nswe_style_eval\\tests\\test_T04_input_validation.py:52: in test_handler_sanitizes_malicious_input\n    assert \"DROP TABLE\" not in response[\"body\"] or response[\"status\"] != 201, \\\nE   AssertionError: SQL injection pattern should be sanitized\nE   assert ('DROP TABLE' not in '{\"message\":...ckets; --\"}}'\nE     \nE     'DROP TABLE' is contained here:\nE       tle\": \"'; DROP TABLE tickets; --\", \"description\": \"'; DROP TABLE tickets; --\"}}\nE     ?           ++++++++++ or 201 != 201)\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T04_input_validation.py::TestInputValidation::test_handler_sanitizes_malicious_input['; DROP TABLE tickets; --]\n======================== 1 failed, 12 passed in 0.49s =========================",
+      "return_code": 1
+    },
+    "T05": {
+      "pass": false,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 10 items\n\nswe_style_eval\\tests\\test_T05_ticket_lifecycle.py .....F....             [100%]\n\n================================== FAILURES ===================================\n_______ TestTicketLifecycle.test_invalid_status_transition_should_fail ________\nswe_style_eval\\tests\\test_T05_ticket_lifecycle.py:68: in test_invalid_status_transition_should_fail\n    assert not invalid_transition_allowed, \"CLOSED -> NEW transition should be rejected\"\nE   AssertionError: CLOSED -> NEW transition should be rejected\nE   assert not True\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T05_ticket_lifecycle.py::TestTicketLifecycle::test_invalid_status_transition_should_fail\n========================= 1 failed, 9 passed in 0.25s =========================",
+      "return_code": 1
+    },
+    "T06": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 8 items\n\nswe_style_eval\\tests\\test_T06_silent_failures.py ........                [100%]\n\n============================== 8 passed in 0.11s ==============================",
+      "return_code": 0
+    },
+    "T07": {
+      "pass": false,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "alue\"\nE   AssertionError: assert None == 'value'\nE    +  where None = get('permanent')\nE    +    where get = <helpdesk_ai.store.cache.MemoryCache object at 0x000002433646A390>.get\n_____________ TestCacheInvalidation.test_cache_key_collision_bug ______________\nswe_style_eval\\tests\\test_T07_cache_invalidation.py:86: in test_cache_key_collision_bug\n    assert key1 != key2, \"Different tickets should have different cache keys\"\nE   AssertionError: Different tickets should have different cache keys\nE   assert 'ticket:category=technical:email=user@example.com' != 'ticket:category=technical:email=user@example.com'\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T07_cache_invalidation.py::TestCacheInvalidation::test_cache_no_ttl_never_expires\nFAILED swe_style_eval/tests/test_T07_cache_invalidation.py::TestCacheInvalidation::test_cache_key_collision_bug\n========================= 2 failed, 6 passed in 0.29s =========================",
+      "return_code": 1
+    },
+    "T08": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 7 items\n\nswe_style_eval\\tests\\test_T08_logging_completeness.py .......            [100%]\n\n============================== 7 passed in 0.11s ==============================",
+      "return_code": 0
+    },
+    "T09": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 9 items\n\nswe_style_eval\\tests\\test_T09_config_secrets.py .........                [100%]\n\n============================== 9 passed in 0.11s ==============================",
+      "return_code": 0
+    },
+    "T10": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 10 items\n\nswe_style_eval\\tests\\test_T10_auth_checks.py ..........                  [100%]\n\n============================= 10 passed in 0.20s ==============================",
+      "return_code": 0
+    },
+    "T11": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 4 items\n\nswe_style_eval\\tests\\test_T11_rate_limiting.py ....                      [100%]\n\n============================== 4 passed in 0.13s ==============================",
+      "return_code": 0
+    },
+    "T12": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 4 items\n\nswe_style_eval\\tests\\test_T12_assignment_fairness.py ....                [100%]\n\n============================== 4 passed in 0.09s ==============================",
+      "return_code": 0
+    },
+    "T13": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 17 items\n\nswe_style_eval\\tests\\test_T13_T16_reliability.py .................       [100%]\n\n============================= 17 passed in 0.11s ==============================",
+      "return_code": 0
+    },
+    "T14": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 17 items\n\nswe_style_eval\\tests\\test_T13_T16_reliability.py .................       [100%]\n\n============================= 17 passed in 0.11s ==============================",
+      "return_code": 0
+    },
+    "T15": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 17 items\n\nswe_style_eval\\tests\\test_T13_T16_reliability.py .................       [100%]\n\n============================= 17 passed in 0.10s ==============================",
+      "return_code": 0
+    },
+    "T16": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 17 items\n\nswe_style_eval\\tests\\test_T13_T16_reliability.py .................       [100%]\n\n============================= 17 passed in 0.11s ==============================",
+      "return_code": 0
+    },
+    "T17": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 9 items\n\nswe_style_eval\\tests\\test_T17_T20_compliance.py .........                [100%]\n\n============================== 9 passed in 0.11s ==============================",
+      "return_code": 0
+    },
+    "T18": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 9 items\n\nswe_style_eval\\tests\\test_T17_T20_compliance.py .........                [100%]\n\n============================== 9 passed in 0.10s ==============================",
+      "return_code": 0
+    },
+    "T19": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 9 items\n\nswe_style_eval\\tests\\test_T17_T20_compliance.py .........                [100%]\n\n============================== 9 passed in 0.08s ==============================",
+      "return_code": 0
+    },
+    "T20": {
+      "pass": true,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "============================= test session starts =============================\ncollected 9 items\n\nswe_style_eval\\tests\\test_T17_T20_compliance.py .........                [100%]\n\n============================== 9 passed in 0.07s ==============================",
+      "return_code": 0
+    },
+    "T21": {
+      "pass": false,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "= router.route(sample_ticket)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nfixtures\\helpdesk_ai\\src\\helpdesk_ai\\services\\routing.py:41: in route\n    matching_rule = self.rule_engine.get_highest_priority_match(ticket)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nswe_style_eval\\tests\\test_T21_T25_architecture.py:96: in bad_match\n    raise RuntimeError(\"Rule engine failure\")\nE   RuntimeError: Rule engine failure\n\nDuring handling of the above exception, another exception occurred:\nswe_style_eval\\tests\\test_T21_T25_architecture.py:106: in test_routing_handles_rule_engine_errors\n    pytest.fail(\"RuntimeError should be caught and handled\")\nE   Failed: RuntimeError should be caught and handled\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T21_T25_architecture.py::TestInterServiceErrors::test_routing_handles_rule_engine_errors\n======================== 1 failed, 11 passed in 0.33s =========================",
+      "return_code": 1
+    },
+    "T22": {
+      "pass": false,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "= router.route(sample_ticket)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nfixtures\\helpdesk_ai\\src\\helpdesk_ai\\services\\routing.py:41: in route\n    matching_rule = self.rule_engine.get_highest_priority_match(ticket)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nswe_style_eval\\tests\\test_T21_T25_architecture.py:96: in bad_match\n    raise RuntimeError(\"Rule engine failure\")\nE   RuntimeError: Rule engine failure\n\nDuring handling of the above exception, another exception occurred:\nswe_style_eval\\tests\\test_T21_T25_architecture.py:106: in test_routing_handles_rule_engine_errors\n    pytest.fail(\"RuntimeError should be caught and handled\")\nE   Failed: RuntimeError should be caught and handled\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T21_T25_architecture.py::TestInterServiceErrors::test_routing_handles_rule_engine_errors\n======================== 1 failed, 11 passed in 0.26s =========================",
+      "return_code": 1
+    },
+    "T23": {
+      "pass": false,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "= router.route(sample_ticket)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nfixtures\\helpdesk_ai\\src\\helpdesk_ai\\services\\routing.py:41: in route\n    matching_rule = self.rule_engine.get_highest_priority_match(ticket)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nswe_style_eval\\tests\\test_T21_T25_architecture.py:96: in bad_match\n    raise RuntimeError(\"Rule engine failure\")\nE   RuntimeError: Rule engine failure\n\nDuring handling of the above exception, another exception occurred:\nswe_style_eval\\tests\\test_T21_T25_architecture.py:106: in test_routing_handles_rule_engine_errors\n    pytest.fail(\"RuntimeError should be caught and handled\")\nE   Failed: RuntimeError should be caught and handled\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T21_T25_architecture.py::TestInterServiceErrors::test_routing_handles_rule_engine_errors\n======================== 1 failed, 11 passed in 0.25s =========================",
+      "return_code": 1
+    },
+    "T24": {
+      "pass": false,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "= router.route(sample_ticket)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nfixtures\\helpdesk_ai\\src\\helpdesk_ai\\services\\routing.py:41: in route\n    matching_rule = self.rule_engine.get_highest_priority_match(ticket)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nswe_style_eval\\tests\\test_T21_T25_architecture.py:96: in bad_match\n    raise RuntimeError(\"Rule engine failure\")\nE   RuntimeError: Rule engine failure\n\nDuring handling of the above exception, another exception occurred:\nswe_style_eval\\tests\\test_T21_T25_architecture.py:106: in test_routing_handles_rule_engine_errors\n    pytest.fail(\"RuntimeError should be caught and handled\")\nE   Failed: RuntimeError should be caught and handled\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T21_T25_architecture.py::TestInterServiceErrors::test_routing_handles_rule_engine_errors\n======================== 1 failed, 11 passed in 0.25s =========================",
+      "return_code": 1
+    },
+    "T25": {
+      "pass": false,
+      "passed_tests": [],
+      "failed_tests": [],
+      "evidence": "= router.route(sample_ticket)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nfixtures\\helpdesk_ai\\src\\helpdesk_ai\\services\\routing.py:41: in route\n    matching_rule = self.rule_engine.get_highest_priority_match(ticket)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nswe_style_eval\\tests\\test_T21_T25_architecture.py:96: in bad_match\n    raise RuntimeError(\"Rule engine failure\")\nE   RuntimeError: Rule engine failure\n\nDuring handling of the above exception, another exception occurred:\nswe_style_eval\\tests\\test_T21_T25_architecture.py:106: in test_routing_handles_rule_engine_errors\n    pytest.fail(\"RuntimeError should be caught and handled\")\nE   Failed: RuntimeError should be caught and handled\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T21_T25_architecture.py::TestInterServiceErrors::test_routing_handles_rule_engine_errors\n======================== 1 failed, 11 passed in 0.30s =========================",
+      "return_code": 1
+    }
+  }
+}
