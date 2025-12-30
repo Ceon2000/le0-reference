@@ -1,0 +1,360 @@
+name: SWE-bench-Shaped Suite v2.0
+version: "2.0"
+description: |
+  SWE-bench-Verified-style evaluation suite for helpdesk_ai.
+  Each task follows the pattern: issue → expected behavior → pytest verification.
+  Tests are behavioral and deterministic. No LLM inference in evaluation.
+
+target_codebase: fixtures/helpdesk_ai
+methodology: "apply patch → run tests → pass/fail"
+
+tasks:
+  - task_id: T01
+    prompt_original: "Analyze the ticket routing logic in router.py and identify edge cases that could cause mis-routing."
+    prompt_swe: "Ensure Router.route() handles all edge cases gracefully: None priority, unknown category, empty queue must not cause crashes or mis-assignment."
+    expected_outcome:
+      - "All Category enum values must have a default assignee mapping"
+      - "Route returns valid RoutingResult for any valid Ticket input"
+      - "Confidence score is always in [0, 1] range"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T01_routing_edge_cases.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T02
+    prompt_original: "Review the priority scoring algorithm and verify the normalization calculations are mathematically correct."
+    prompt_swe: "Fix WeightedScorer.score() to prevent ZeroDivisionError and ensure normalized scores are always in [0, 1] range."
+    expected_outcome:
+      - "Empty weights dict must not cause ZeroDivisionError"
+      - "Normalized score ∈ [0.0, 1.0] for all inputs"
+      - "Score monotonicity: higher priority → higher score"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T02_scoring_normalization.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T03
+    prompt_original: "Examine the database connection handling in storage.py for potential connection leaks."
+    prompt_swe: "Ensure MemoryStore is thread-safe: concurrent reads and writes must not cause data corruption or race conditions."
+    expected_outcome:
+      - "100 concurrent writes result in exactly 100 stored tickets"
+      - "Concurrent read/write operations complete without exceptions"
+      - "Store count matches actual stored items after any operation sequence"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T03_connection_leaks.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T04
+    prompt_original: "Audit the input validation functions for SQL injection vulnerabilities."
+    prompt_swe: "Prevent SQL injection: TicketHandler.post() must sanitize or reject malicious input patterns like '; DROP TABLE'."
+    expected_outcome:
+      - "SQL injection patterns must not appear unmodified in response body"
+      - "Invalid JSON returns 400 status"
+      - "Malicious payloads are either rejected or sanitized"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T04_input_validation.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T05
+    prompt_original: "Trace the ticket lifecycle from creation to resolution and document state transitions."
+    prompt_swe: "Enforce valid state transitions: Ticket.update() must reject invalid transitions like CLOSED→NEW."
+    expected_outcome:
+      - "Valid transitions (NEW→TRIAGED→ASSIGNED→IN_PROGRESS→RESOLVED→CLOSED) succeed"
+      - "Invalid transitions raise ValueError"
+      - "Each update changes updated_at timestamp"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T05_ticket_lifecycle.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T06
+    prompt_original: "Analyze the error handling patterns and identify any silent failures."
+    prompt_swe: "Ensure errors are not silently swallowed: failed operations must return meaningful error indicators or log warnings."
+    expected_outcome:
+      - "Config load failures are logged, not silently ignored"
+      - "Missing keys return explicit None or default, not crash"
+      - "Delete of non-existent item returns False, not exception"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T06_silent_failures.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T07
+    prompt_original: "Review the caching strategy and identify potential cache invalidation issues."
+    prompt_swe: "Fix MemoryCache key generation to prevent collision: different tickets must get different cache keys."
+    expected_outcome:
+      - "Tickets with same email/category but different IDs get different keys"
+      - "Cache entries expire correctly after TTL"
+      - "Expired entries return None on get()"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T07_cache_invalidation.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T08
+    prompt_original: "Examine the logging implementation for consistency and completeness."
+    prompt_swe: "Ensure critical operations emit log events: routing, escalation, and storage operations must be logged."
+    expected_outcome:
+      - "Route decisions logged with ticket ID and assignee"
+      - "Escalation actions logged with reason"
+      - "Storage save/delete operations logged"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T08_logging_completeness.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T09
+    prompt_original: "Analyze the configuration loading mechanism for security issues with sensitive values."
+    prompt_swe: "Ensure Config handles environment overrides consistently: env vars must override file config, with proper type conversion."
+    expected_outcome:
+      - "Environment variable HELPDESK_X overrides config file value"
+      - "Integer/boolean env vars are properly type-converted"
+      - "Secrets in config are not logged in plaintext"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T09_config_secrets.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T10
+    prompt_original: "Review the API endpoint handlers for proper authentication checks."
+    prompt_swe: "Enforce authentication: TicketHandler methods must check auth context and return 401/403 for unauthorized requests."
+    expected_outcome:
+      - "Unauthenticated requests return 401"
+      - "Unauthorized requests return 403"
+      - "Health endpoint remains public (200 without auth)"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T10_auth_checks.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T11
+    prompt_original: "Examine the rate limiting implementation and identify bypass scenarios."
+    prompt_swe: "Enforce rate limiting: repeated rapid requests must trigger 429 response after threshold."
+    expected_outcome:
+      - "100 rapid requests trigger at least one 429 response"
+      - "Rate limit headers present in response (X-RateLimit-*)"
+      - "Rate limits are per-client, not global"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T11_rate_limiting.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T12
+    prompt_original: "Analyze the ticket assignment algorithm for fairness across agents."
+    prompt_swe: "Ensure fair ticket distribution: same category routes to same team, different categories distribute across teams."
+    expected_outcome:
+      - "All TECHNICAL tickets go to tech-team"
+      - "Different categories route to different teams"
+      - "No single assignee receives 100% of diverse tickets"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T12_assignment_fairness.py
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T13
+    prompt_original: "Review the notification system for reliability and delivery guarantees."
+    prompt_swe: "Ensure escalation updates ticket metadata correctly: escalated_at and escalation_reason must be set."
+    expected_outcome:
+      - "Escalation adds 'escalated_at' to ticket.metadata"
+      - "Reason parameter stored in 'escalation_reason'"
+      - "Each escalation increases priority (LOW→MEDIUM→HIGH→CRITICAL)"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T13_T16_reliability.py::TestNotificationReliability
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T14
+    prompt_original: "Examine the search functionality for performance issues with large datasets."
+    prompt_swe: "Ensure MemoryStore.search() returns correct results for large datasets (1000+ tickets)."
+    expected_outcome:
+      - "Search by category returns only matching tickets"
+      - "Search by multiple criteria uses AND logic"
+      - "Results are consistent regardless of insertion order"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T13_T16_reliability.py::TestSearchPerformance
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T15
+    prompt_original: "Analyze the file attachment handling for security vulnerabilities."
+    prompt_swe: "Prevent path traversal and dangerous file uploads: reject filenames with '../' and dangerous extensions."
+    expected_outcome:
+      - "Filenames with '../' are rejected"
+      - "Executable extensions (.exe, .bat) are rejected"
+      - "Null byte injections in filenames are sanitized"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T13_T16_reliability.py::TestAttachmentSecurity
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T16
+    prompt_original: "Review the session management implementation for security best practices."
+    prompt_swe: "Enforce session security: rotate session on auth, invalidate on logout, set secure flags."
+    expected_outcome:
+      - "New session created on authentication"
+      - "Session invalidated on logout"
+      - "Session rotated on privilege change"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T13_T16_reliability.py::TestSessionManagement
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T17
+    prompt_original: "Examine the audit logging for compliance requirements."
+    prompt_swe: "Ensure sensitive operations emit audit trail: escalations and priority changes must create audit records."
+    expected_outcome:
+      - "Escalation creates audit log entry"
+      - "Priority changes are tracked with old/new values"
+      - "Audit records include timestamp and actor"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T17_T20_compliance.py::TestAuditCompliance
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T18
+    prompt_original: "Analyze the queue management for priority inversion issues."
+    prompt_swe: "Prevent priority inversion: CRITICAL tickets must be escalated regardless of queue position."
+    expected_outcome:
+      - "CRITICAL tickets in batch_check are always escalated"
+      - "CRITICAL ticket at end of queue is not starved by LOW tickets"
+      - "Escalation order respects priority, not insertion order"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T17_T20_compliance.py::TestPriorityInversion
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T19
+    prompt_original: "Review the escalation rules engine for correctness."
+    prompt_swe: "Ensure EscalationService correctly identifies tickets needing escalation based on age and priority."
+    expected_outcome:
+      - "Tickets older than threshold_hours should escalate"
+      - "CRITICAL tickets auto-escalate regardless of age"
+      - "RESOLVED/CLOSED tickets never escalate"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T17_T20_compliance.py::TestEscalationRules
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T20
+    prompt_original: "Examine the SLA tracking calculations for timezone handling."
+    prompt_swe: "Ensure ticket timestamps serialize/deserialize correctly across timezone conversions."
+    expected_outcome:
+      - "to_dict() produces ISO format timestamp strings"
+      - "from_dict() correctly parses timestamps back to datetime"
+      - "Round-trip preserves timestamp values"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T17_T20_compliance.py::TestSLATimezone
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T21
+    prompt_original: "Analyze the metrics collection for accuracy and completeness."
+    prompt_swe: "Ensure MemoryStore.count() and list_all() accurately reflect stored state."
+    expected_outcome:
+      - "count() returns exact number of stored tickets"
+      - "list_all() returns all stored tickets (no missing, no duplicates)"
+      - "After save/delete, counts update immediately"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T21_T25_architecture.py::TestMetricsAccuracy
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T22
+    prompt_original: "Review the backup and recovery procedures in the storage layer."
+    prompt_swe: "Ensure tickets survive serialize/deserialize round-trip: all fields preserved through to_dict()/from_dict()."
+    expected_outcome:
+      - "Ticket.to_dict() preserves all fields"
+      - "Ticket.from_dict() restores enum types correctly"
+      - "Store can be repopulated from serialized backup"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T21_T25_architecture.py::TestBackupRecovery
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T23
+    prompt_original: "Examine the inter-service communication for error handling."
+    prompt_swe: "Ensure Router handles RuleEngine failures gracefully: wrap or catch exceptions, don't propagate raw RuntimeError."
+    expected_outcome:
+      - "RuleEngine exceptions are caught and handled"
+      - "Fallback to default routing on rule engine failure"
+      - "Error is logged, not silently swallowed"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T21_T25_architecture.py::TestInterServiceErrors
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T24
+    prompt_original: "Analyze the user permission model for privilege escalation risks."
+    prompt_swe: "Ensure ticket updates track the actor: who made changes must be recorded for audit."
+    expected_outcome:
+      - "Ticket.requester_email is always set"
+      - "Routed ticket has assigned_to set"
+      - "Updates record who made the change"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T21_T25_architecture.py::TestPermissionModel
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true
+
+  - task_id: T25
+    prompt_original: "Review the overall system architecture for single points of failure."
+    prompt_swe: "Ensure services are independent: separate MemoryStore/Config instances must not share state."
+    expected_outcome:
+      - "Two MemoryStore instances have independent state"
+      - "Two Config instances can have different values"
+      - "Services can be instantiated independently"
+    tests:
+      nodeids:
+        - swe_style_eval/tests/test_T21_T25_architecture.py::TestArchitectureSPOF
+    scoring:
+      mode: pytest
+      pass_if_all_tests_pass: true

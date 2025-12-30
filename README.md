@@ -1,90 +1,145 @@
 # LE-0 Reference Implementation
 
-## What this is / What this is not
+## Retrieval-Native Benchmark (25 Tasks × 3 Steps)
 
-This repository provides a runnable reference example that compares vLLM standalone execution against vLLM execution wrapped with LE-0 for a realistic multi-step workflow.
+This benchmark demonstrates LE-0's **retrieval-native execution model** where snippet deduplication reduces token payload over time.
 
-**What this is:** A reference implementation wrapper for evaluating LE-0.
+### Why 25 Tasks?
 
-**What this is not:** LE-0 itself. The LE-0 runtime is distributed separately and must be obtained independently.
+- Aligns with LE-0's maximum workflow length
+- Enables compounding reuse as snippets repeat across tasks
+- Shows clear separation between early tasks (building cache) and later tasks (high reuse)
 
-## Getting LE-0
+---
 
-To run this example, you must first request access to the LE-0 runtime.
+## Architecture
 
-[Request LE-0 runtime access here](https://www.clclabs.ai/le-0) (you will receive a wheel file for local installation)
+| Mode | Snippet Handling | Token Payload |
+|------|------------------|---------------|
+| **Baseline** | Resend full `snippet_text` every time | Constant |
+| **Treatment** | Send `snippet_text` once, then `snippet_id` | Decreases |
 
-Once you have the LE-0 wheel file, set `LE0_WHEEL` to its path.
+### Retrieval-Native Agent
+
+Each task runs 3 steps:
+1. **Planner**: Decides what to analyze
+2. **Executor**: Performs lookups, reasons over code
+3. **Verifier**: Validates findings
+
+```
+repo_lookup(query) -> {snippet_id, snippet_text, source_path}
+```
+
+---
 
 ## Quick Start
 
-**Prerequisites:** Python 3.8+, CUDA-capable GPU, LE-0 wheel file (for MODE=le0 and MODE=both).
-
-### vLLM Standalone only
+### Run Baseline (5 Tasks)
 ```bash
-MODE=standalone bash run.sh
+NUM_TASKS=5 python3 standalone_runner.py
 ```
 
-### vLLM + LE-0 only
+### Run Treatment (5 Tasks)
 ```bash
-LE0_WHEEL=dist/le0_runtime-0.1.3-py3-none-any.whl MODE=le0 bash run.sh
+NUM_TASKS=5 python3 le0_runner.py
 ```
 
-### One-command comparison (recommended)
-
-Runs vLLM Standalone → vLLM+LE-0 back-to-back.
-
+### Full 25-Task Comparison
 ```bash
-LE0_WHEEL=dist/le0_runtime-0.1.3-py3-none-any.whl MODE=both bash run.sh
+NUM_TASKS=25 python3 standalone_runner.py > baseline.json 2>&1
+NUM_TASKS=25 python3 le0_runner.py > treatment.json 2>&1
 ```
 
-### Clean screenshots (no progress output)
+---
+
+## Expected Results
+
+| Metric | Baseline | Treatment |
+|--------|----------|-----------|
+| Client Sent Tokens | ~150K (constant) | ~50K (decreasing) |
+| Snippet Tokens | ~100K | ~30K |
+| Reuse Rate | 0% | ~60% |
+
+---
+
+## Metrics
+
+- **`client_sent_tokens`**: Tokens actually sent
+- **`snippet_tokens_sent`**: Tokens from snippet payloads
+- **`unique_snippets`**: Distinct snippets retrieved
+- **`snippet_reuse_rate`**: % lookups hitting cache
+
+---
+
+## SWE-bench-shaped Scoring
+
+This repository includes a **SWE-bench Verified-style evaluation suite** for code quality assessment.
+
+### What is SWE-bench Verified?
+
+[SWE-bench Verified](https://www.swebench.com/) evaluates code repair agents using:
+1. **Issue description** (prompt) describing what needs to be fixed
+2. **Apply patch** to the target codebase
+3. **Run tests** (pytest) to verify the fix
+4. **Pass/fail** outcome per issue
+
+### How Our Suite Mirrors It
+
+| SWE-bench Verified | Our Suite |
+|-------------------|-----------|
+| Real GitHub issues | 25 synthetic audit tasks (T01-T25) |
+| Real repos | `fixtures/helpdesk_ai/` synthetic codebase |
+| Real test suites | `swe_style_eval/tests/` pytest suite |
+| Docker isolation | Local pytest execution |
+
+**Methodology**: `apply patch → run tests → pass/fail`
+
+### Prompts vs Tests
+
+- **Prompts** (`prompt_swe`): Describe the issue and expected fix
+- **Tests**: Are the ground truth for pass/fail scoring
+- **Expected outcomes**: Document the behavioral invariants
+
+### Commands
+
 ```bash
-QUIET=1 MODE=standalone bash run.sh
-QUIET=1 LE0_WHEEL=dist/le0_runtime-0.1.3-py3-none-any.whl MODE=le0 bash run.sh
-QUIET=1 LE0_WHEEL=dist/le0_runtime-0.1.3-py3-none-any.whl MODE=both bash run.sh
+# Run the full 25-task suite
+python -m swe_style_eval.runner --suite tasks/swebench_shaped_suite_25.yaml -v
+
+# Output: swe_results.json with per-task pass/fail and evidence
 ```
 
-### Quick sanity check
-```bash
-ls dist/le0_runtime-0.1.3-py3-none-any.whl
+### Interpreting Results
+
+| Metric | Meaning |
+|--------|---------|
+| **Fixture compliance baseline** | How many tasks pass on current (unfixed) code |
+| **Agent repair accuracy** | How many failing tasks become passing after patches |
+| **pass_rate** | `passed_tasks / total_tasks` |
+
+### Example Output
+
+```json
+{
+  "suite_name": "SWE-bench-Shaped Suite v2.0",
+  "passed_tasks": ["T01", "T03", ...],
+  "failed_tasks": ["T02", "T04", ...],
+  "pass_rate": 0.64,
+  "per_task": {
+    "T02": {
+      "pass": false,
+      "prompt_swe": "Fix WeightedScorer.score() to prevent ZeroDivisionError...",
+      "expected_outcome": ["Normalized score ∈ [0.0, 1.0]", ...],
+      "brief_evidence": ["AssertionError: Normalized score 7.5 out of range"]
+    }
+  }
+}
 ```
 
-**Note:** `NUM_FLOWS` (default: 25, max: 25) controls how many workflows are executed from the multi-task benchmark suite. Each workflow uses a different prompt that focuses on a distinct analysis task over the same codebase. If `MODE` is not specified, it defaults to `le0`.
+---
 
-The standalone mode establishes baseline per-step latency and token counts; the LE-0 mode demonstrates bounded reuse across steps using the same workflow.
+## IP Safety
 
-## Expected Output
-
-The script executes `NUM_FLOWS` workflows (default 25), each with 3 steps (planner/executor/verifier), and prints:
-
-- Banner: `vLLM Standalone` or `vLLM+LE-0`
-- One `[INPUT]` line: `fixture_bytes=... fixture_files=...`
-- For each workflow: Three `[TARGET]` lines: `step=... latency_ms=... prompt_tokens=... decode_tokens=... local_out_hash=...`
-- In `MODE=le0`, LE-0 prints additional per-step hash lines
-
-**No model output text is printed** (IP-safe: hash-only stdout, no prompts or raw model output). LE-0 stdout contains only hash lines. Metrics are printed to stderr with `[TARGET]` prefix. Correctness is verified via step execution completion and stable per-step output hashes; performance characteristics are reflected in latency and token counts.
-
-Each workflow uses a different prompt from the benchmark suite, focusing on distinct analysis tasks over the same codebase.
-
-## Environment Variables
-
-- `LE0_WHEEL` (required for MODE=le0 and MODE=both): Path to LE-0 wheel file
-- `MODE` (optional): `standalone`, `le0`, or `both`, defaults to `le0`
-- `NUM_FLOWS` (optional): Number of workflows to execute (1-25), defaults to 25
-- `MODEL` (optional): Model ID, defaults to `allenai/Olmo-3-7B-Think`
-- `QUIET` (optional): Set to `1` to suppress `[PROGRESS]` messages
-- `LE0_TARGET` (required for MODE=le0): Target function, defaults to `target_vllm:run`. This is the only LE-0 requirement.
-- `LE0_REF_FLOWS_DIR` (reference-only): Directory containing expanded flow files, defaults to `flows`. Used by the target to load flow content.
-
-## What's in this repo
-
-- `target_vllm.py`: vLLM wrapper implementing the target interface
-- `fixture_loader.py`: Loads fixture codebase from `fixtures/helpdesk_ai/`
-- `run_flow.py`: Expands flow JSON with prompts from suite and fixture content
-- `standalone_runner.py`: Sequential workflow execution for MODE=standalone
-- `run.sh`: Setup and execution script
-- `flows/three_step.json`: Flow definition with three steps
-- `flows/prompt_suite.json`: Multi-task benchmark prompt suite
-
-**Non-goals:** This reference does not measure throughput, batching efficiency, or cross-node behavior.
+- LE-0 is a **black box**
+- `snippet_id` is opaque (SHA256-based)
+- No KV internals or merge semantics exposed

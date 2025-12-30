@@ -1,6 +1,8 @@
 {
-  "suite": "tasks/swe_style_suite_25.yaml",
-  "timestamp": "2025-12-30T17:15:29.155894",
+  "suite_name": "SWE-bench-Shaped Suite v2.0",
+  "suite_path": "tasks/swebench_shaped_suite_25.yaml",
+  "methodology": "apply patch \u2192 run tests \u2192 pass/fail",
+  "timestamp": "2025-12-30T17:28:41.960188",
   "total_tasks": 25,
   "passed_tasks": [
     "T01",
@@ -18,195 +20,332 @@
     "T17",
     "T18",
     "T19",
-    "T20"
+    "T20",
+    "T21",
+    "T22",
+    "T24",
+    "T25"
   ],
   "failed_tasks": [
     "T02",
     "T04",
     "T05",
     "T07",
-    "T21",
-    "T22",
-    "T23",
-    "T24",
-    "T25"
+    "T23"
   ],
-  "pass_rate": 0.64,
+  "pass_rate": 0.8,
   "per_task": {
     "T01": {
       "pass": true,
+      "prompt_swe": "Ensure Router.route() handles all edge cases gracefully: None priority, unknown category, empty queue must not cause crashes or mis-assignment.",
+      "expected_outcome": [
+        "All Category enum values must have a default assignee mapping",
+        "Route returns valid RoutingResult for any valid Ticket input",
+        "Confidence score is always in [0, 1] range"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 10 items\n\nswe_style_eval\\tests\\test_T01_routing_edge_cases.py ..........           [100%]\n\n============================= 10 passed in 0.19s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T02": {
       "pass": false,
+      "prompt_swe": "Fix WeightedScorer.score() to prevent ZeroDivisionError and ensure normalized scores are always in [0, 1] range.",
+      "expected_outcome": [
+        "Empty weights dict must not cause ZeroDivisionError",
+        "Normalized score \u2208 [0.0, 1.0] for all inputs",
+        "Score monotonicity: higher priority \u2192 higher score"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============\ncollected 7 items\n\nswe_style_eval\\tests\\test_T02_scoring_normalization.py ..F....           [100%]\n\n================================== FAILURES ===================================\n___________ TestScoringNormalization.test_normalized_score_in_range ___________\nswe_style_eval\\tests\\test_T02_scoring_normalization.py:38: in test_normalized_score_in_range\n    assert 0.0 <= score.normalized <= 1.0, f\"Normalized score {score.normalized} out of range\"\nE   AssertionError: Normalized score 7.5 out of range\nE   assert 7.5 <= 1.0\nE    +  where 7.5 = <[ValueError(\"Invalid format specifier '.2f if self.normalized else None' for object of type 'float'\") raised in repr()] Score object at 0x1a31aa38cd0>.normalized\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T02_scoring_normalization.py::TestScoringNormalization::test_normalized_score_in_range\n========================= 1 failed, 6 passed in 0.25s =========================",
-      "return_code": 1
+      "brief_evidence": [
+        "E   AssertionError: Normalized score 7.5 out of range",
+        "assert 7.5 <= 1.0"
+      ]
     },
     "T03": {
       "pass": true,
+      "prompt_swe": "Ensure MemoryStore is thread-safe: concurrent reads and writes must not cause data corruption or race conditions.",
+      "expected_outcome": [
+        "100 concurrent writes result in exactly 100 stored tickets",
+        "Concurrent read/write operations complete without exceptions",
+        "Store count matches actual stored items after any operation sequence"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 5 items\n\nswe_style_eval\\tests\\test_T03_connection_leaks.py .....                  [100%]\n\n============================== 5 passed in 0.16s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T04": {
       "pass": false,
+      "prompt_swe": "Prevent SQL injection: TicketHandler.post() must sanitize or reject malicious input patterns like '; DROP TABLE'.",
+      "expected_outcome": [
+        "SQL injection patterns must not appear unmodified in response body",
+        "Invalid JSON returns 400 status",
+        "Malicious payloads are either rejected or sanitized"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "put_validation.py ...F.........          [100%]\n\n================================== FAILURES ===================================\n_ TestInputValidation.test_handler_sanitizes_malicious_input['; DROP TABLE tickets; --] _\nswe_style_eval\\tests\\test_T04_input_validation.py:52: in test_handler_sanitizes_malicious_input\n    assert \"DROP TABLE\" not in response[\"body\"] or response[\"status\"] != 201, \\\nE   AssertionError: SQL injection pattern should be sanitized\nE   assert ('DROP TABLE' not in '{\"message\":...ckets; --\"}}'\nE     \nE     'DROP TABLE' is contained here:\nE       tle\": \"'; DROP TABLE tickets; --\", \"description\": \"'; DROP TABLE tickets; --\"}}\nE     ?           ++++++++++ or 201 != 201)\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T04_input_validation.py::TestInputValidation::test_handler_sanitizes_malicious_input['; DROP TABLE tickets; --]\n======================== 1 failed, 12 passed in 0.49s =========================",
-      "return_code": 1
+      "brief_evidence": [
+        "E   AssertionError: SQL injection pattern should be sanitized",
+        "assert ('DROP TABLE' not in '{\"message\":...ckets; --\"}}'"
+      ]
     },
     "T05": {
       "pass": false,
+      "prompt_swe": "Enforce valid state transitions: Ticket.update() must reject invalid transitions like CLOSED\u2192NEW.",
+      "expected_outcome": [
+        "Valid transitions (NEW\u2192TRIAGED\u2192ASSIGNED\u2192IN_PROGRESS\u2192RESOLVED\u2192CLOSED) succeed",
+        "Invalid transitions raise ValueError",
+        "Each update changes updated_at timestamp"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 10 items\n\nswe_style_eval\\tests\\test_T05_ticket_lifecycle.py .....F....             [100%]\n\n================================== FAILURES ===================================\n_______ TestTicketLifecycle.test_invalid_status_transition_should_fail ________\nswe_style_eval\\tests\\test_T05_ticket_lifecycle.py:68: in test_invalid_status_transition_should_fail\n    assert not invalid_transition_allowed, \"CLOSED -> NEW transition should be rejected\"\nE   AssertionError: CLOSED -> NEW transition should be rejected\nE   assert not True\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T05_ticket_lifecycle.py::TestTicketLifecycle::test_invalid_status_transition_should_fail\n========================= 1 failed, 9 passed in 0.25s =========================",
-      "return_code": 1
+      "brief_evidence": [
+        "E   AssertionError: CLOSED -> NEW transition should be rejected",
+        "assert not True"
+      ]
     },
     "T06": {
       "pass": true,
+      "prompt_swe": "Ensure errors are not silently swallowed: failed operations must return meaningful error indicators or log warnings.",
+      "expected_outcome": [
+        "Config load failures are logged, not silently ignored",
+        "Missing keys return explicit None or default, not crash",
+        "Delete of non-existent item returns False, not exception"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 8 items\n\nswe_style_eval\\tests\\test_T06_silent_failures.py ........                [100%]\n\n============================== 8 passed in 0.11s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T07": {
       "pass": false,
+      "prompt_swe": "Fix MemoryCache key generation to prevent collision: different tickets must get different cache keys.",
+      "expected_outcome": [
+        "Tickets with same email/category but different IDs get different keys",
+        "Cache entries expire correctly after TTL",
+        "Expired entries return None on get()"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "alue\"\nE   AssertionError: assert None == 'value'\nE    +  where None = get('permanent')\nE    +    where get = <helpdesk_ai.store.cache.MemoryCache object at 0x000002433646A390>.get\n_____________ TestCacheInvalidation.test_cache_key_collision_bug ______________\nswe_style_eval\\tests\\test_T07_cache_invalidation.py:86: in test_cache_key_collision_bug\n    assert key1 != key2, \"Different tickets should have different cache keys\"\nE   AssertionError: Different tickets should have different cache keys\nE   assert 'ticket:category=technical:email=user@example.com' != 'ticket:category=technical:email=user@example.com'\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T07_cache_invalidation.py::TestCacheInvalidation::test_cache_no_ttl_never_expires\nFAILED swe_style_eval/tests/test_T07_cache_invalidation.py::TestCacheInvalidation::test_cache_key_collision_bug\n========================= 2 failed, 6 passed in 0.29s =========================",
-      "return_code": 1
+      "brief_evidence": [
+        "E   AssertionError: assert None == 'value'",
+        "D:\\LE-0 Reference\\le0-reference\\swe_style_eval\\tests\\test_T07_cache_invalidation.py:49: Assertion..."
+      ]
     },
     "T08": {
       "pass": true,
+      "prompt_swe": "Ensure critical operations emit log events: routing, escalation, and storage operations must be logged.",
+      "expected_outcome": [
+        "Route decisions logged with ticket ID and assignee",
+        "Escalation actions logged with reason",
+        "Storage save/delete operations logged"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 7 items\n\nswe_style_eval\\tests\\test_T08_logging_completeness.py .......            [100%]\n\n============================== 7 passed in 0.11s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T09": {
       "pass": true,
+      "prompt_swe": "Ensure Config handles environment overrides consistently: env vars must override file config, with proper type conversion.",
+      "expected_outcome": [
+        "Environment variable HELPDESK_X overrides config file value",
+        "Integer/boolean env vars are properly type-converted",
+        "Secrets in config are not logged in plaintext"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 9 items\n\nswe_style_eval\\tests\\test_T09_config_secrets.py .........                [100%]\n\n============================== 9 passed in 0.11s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T10": {
       "pass": true,
+      "prompt_swe": "Enforce authentication: TicketHandler methods must check auth context and return 401/403 for unauthorized requests.",
+      "expected_outcome": [
+        "Unauthenticated requests return 401",
+        "Unauthorized requests return 403",
+        "Health endpoint remains public (200 without auth)"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 10 items\n\nswe_style_eval\\tests\\test_T10_auth_checks.py ..........                  [100%]\n\n============================= 10 passed in 0.20s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T11": {
       "pass": true,
+      "prompt_swe": "Enforce rate limiting: repeated rapid requests must trigger 429 response after threshold.",
+      "expected_outcome": [
+        "100 rapid requests trigger at least one 429 response",
+        "Rate limit headers present in response (X-RateLimit-*)",
+        "Rate limits are per-client, not global"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 4 items\n\nswe_style_eval\\tests\\test_T11_rate_limiting.py ....                      [100%]\n\n============================== 4 passed in 0.13s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T12": {
       "pass": true,
+      "prompt_swe": "Ensure fair ticket distribution: same category routes to same team, different categories distribute across teams.",
+      "expected_outcome": [
+        "All TECHNICAL tickets go to tech-team",
+        "Different categories route to different teams",
+        "No single assignee receives 100% of diverse tickets"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 4 items\n\nswe_style_eval\\tests\\test_T12_assignment_fairness.py ....                [100%]\n\n============================== 4 passed in 0.09s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T13": {
       "pass": true,
+      "prompt_swe": "Ensure escalation updates ticket metadata correctly: escalated_at and escalation_reason must be set.",
+      "expected_outcome": [
+        "Escalation adds 'escalated_at' to ticket.metadata",
+        "Reason parameter stored in 'escalation_reason'",
+        "Each escalation increases priority (LOW\u2192MEDIUM\u2192HIGH\u2192CRITICAL)"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 17 items\n\nswe_style_eval\\tests\\test_T13_T16_reliability.py .................       [100%]\n\n============================= 17 passed in 0.11s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T14": {
       "pass": true,
+      "prompt_swe": "Ensure MemoryStore.search() returns correct results for large datasets (1000+ tickets).",
+      "expected_outcome": [
+        "Search by category returns only matching tickets",
+        "Search by multiple criteria uses AND logic",
+        "Results are consistent regardless of insertion order"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 17 items\n\nswe_style_eval\\tests\\test_T13_T16_reliability.py .................       [100%]\n\n============================= 17 passed in 0.11s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T15": {
       "pass": true,
+      "prompt_swe": "Prevent path traversal and dangerous file uploads: reject filenames with '../' and dangerous extensions.",
+      "expected_outcome": [
+        "Filenames with '../' are rejected",
+        "Executable extensions (.exe, .bat) are rejected",
+        "Null byte injections in filenames are sanitized"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 17 items\n\nswe_style_eval\\tests\\test_T13_T16_reliability.py .................       [100%]\n\n============================= 17 passed in 0.10s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T16": {
       "pass": true,
+      "prompt_swe": "Enforce session security: rotate session on auth, invalidate on logout, set secure flags.",
+      "expected_outcome": [
+        "New session created on authentication",
+        "Session invalidated on logout",
+        "Session rotated on privilege change"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 17 items\n\nswe_style_eval\\tests\\test_T13_T16_reliability.py .................       [100%]\n\n============================= 17 passed in 0.11s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T17": {
       "pass": true,
+      "prompt_swe": "Ensure sensitive operations emit audit trail: escalations and priority changes must create audit records.",
+      "expected_outcome": [
+        "Escalation creates audit log entry",
+        "Priority changes are tracked with old/new values",
+        "Audit records include timestamp and actor"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 9 items\n\nswe_style_eval\\tests\\test_T17_T20_compliance.py .........                [100%]\n\n============================== 9 passed in 0.11s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T18": {
       "pass": true,
+      "prompt_swe": "Prevent priority inversion: CRITICAL tickets must be escalated regardless of queue position.",
+      "expected_outcome": [
+        "CRITICAL tickets in batch_check are always escalated",
+        "CRITICAL ticket at end of queue is not starved by LOW tickets",
+        "Escalation order respects priority, not insertion order"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 9 items\n\nswe_style_eval\\tests\\test_T17_T20_compliance.py .........                [100%]\n\n============================== 9 passed in 0.10s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T19": {
       "pass": true,
+      "prompt_swe": "Ensure EscalationService correctly identifies tickets needing escalation based on age and priority.",
+      "expected_outcome": [
+        "Tickets older than threshold_hours should escalate",
+        "CRITICAL tickets auto-escalate regardless of age",
+        "RESOLVED/CLOSED tickets never escalate"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 9 items\n\nswe_style_eval\\tests\\test_T17_T20_compliance.py .........                [100%]\n\n============================== 9 passed in 0.08s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T20": {
       "pass": true,
+      "prompt_swe": "Ensure ticket timestamps serialize/deserialize correctly across timezone conversions.",
+      "expected_outcome": [
+        "to_dict() produces ISO format timestamp strings",
+        "from_dict() correctly parses timestamps back to datetime",
+        "Round-trip preserves timestamp values"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "============================= test session starts =============================\ncollected 9 items\n\nswe_style_eval\\tests\\test_T17_T20_compliance.py .........                [100%]\n\n============================== 9 passed in 0.07s ==============================",
-      "return_code": 0
+      "brief_evidence": []
     },
     "T21": {
-      "pass": false,
+      "pass": true,
+      "prompt_swe": "Ensure MemoryStore.count() and list_all() accurately reflect stored state.",
+      "expected_outcome": [
+        "count() returns exact number of stored tickets",
+        "list_all() returns all stored tickets (no missing, no duplicates)",
+        "After save/delete, counts update immediately"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "= router.route(sample_ticket)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nfixtures\\helpdesk_ai\\src\\helpdesk_ai\\services\\routing.py:41: in route\n    matching_rule = self.rule_engine.get_highest_priority_match(ticket)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nswe_style_eval\\tests\\test_T21_T25_architecture.py:96: in bad_match\n    raise RuntimeError(\"Rule engine failure\")\nE   RuntimeError: Rule engine failure\n\nDuring handling of the above exception, another exception occurred:\nswe_style_eval\\tests\\test_T21_T25_architecture.py:106: in test_routing_handles_rule_engine_errors\n    pytest.fail(\"RuntimeError should be caught and handled\")\nE   Failed: RuntimeError should be caught and handled\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T21_T25_architecture.py::TestInterServiceErrors::test_routing_handles_rule_engine_errors\n======================== 1 failed, 11 passed in 0.33s =========================",
-      "return_code": 1
+      "brief_evidence": []
     },
     "T22": {
-      "pass": false,
+      "pass": true,
+      "prompt_swe": "Ensure tickets survive serialize/deserialize round-trip: all fields preserved through to_dict()/from_dict().",
+      "expected_outcome": [
+        "Ticket.to_dict() preserves all fields",
+        "Ticket.from_dict() restores enum types correctly",
+        "Store can be repopulated from serialized backup"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "= router.route(sample_ticket)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nfixtures\\helpdesk_ai\\src\\helpdesk_ai\\services\\routing.py:41: in route\n    matching_rule = self.rule_engine.get_highest_priority_match(ticket)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nswe_style_eval\\tests\\test_T21_T25_architecture.py:96: in bad_match\n    raise RuntimeError(\"Rule engine failure\")\nE   RuntimeError: Rule engine failure\n\nDuring handling of the above exception, another exception occurred:\nswe_style_eval\\tests\\test_T21_T25_architecture.py:106: in test_routing_handles_rule_engine_errors\n    pytest.fail(\"RuntimeError should be caught and handled\")\nE   Failed: RuntimeError should be caught and handled\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T21_T25_architecture.py::TestInterServiceErrors::test_routing_handles_rule_engine_errors\n======================== 1 failed, 11 passed in 0.26s =========================",
-      "return_code": 1
+      "brief_evidence": []
     },
     "T23": {
       "pass": false,
+      "prompt_swe": "Ensure Router handles RuleEngine failures gracefully: wrap or catch exceptions, don't propagate raw RuntimeError.",
+      "expected_outcome": [
+        "RuleEngine exceptions are caught and handled",
+        "Fallback to default routing on rule engine failure",
+        "Error is logged, not silently swallowed"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "= router.route(sample_ticket)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nfixtures\\helpdesk_ai\\src\\helpdesk_ai\\services\\routing.py:41: in route\n    matching_rule = self.rule_engine.get_highest_priority_match(ticket)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nswe_style_eval\\tests\\test_T21_T25_architecture.py:96: in bad_match\n    raise RuntimeError(\"Rule engine failure\")\nE   RuntimeError: Rule engine failure\n\nDuring handling of the above exception, another exception occurred:\nswe_style_eval\\tests\\test_T21_T25_architecture.py:106: in test_routing_handles_rule_engine_errors\n    pytest.fail(\"RuntimeError should be caught and handled\")\nE   Failed: RuntimeError should be caught and handled\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T21_T25_architecture.py::TestInterServiceErrors::test_routing_handles_rule_engine_errors\n======================== 1 failed, 11 passed in 0.25s =========================",
-      "return_code": 1
+      "brief_evidence": []
     },
     "T24": {
-      "pass": false,
+      "pass": true,
+      "prompt_swe": "Ensure ticket updates track the actor: who made changes must be recorded for audit.",
+      "expected_outcome": [
+        "Ticket.requester_email is always set",
+        "Routed ticket has assigned_to set",
+        "Updates record who made the change"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "= router.route(sample_ticket)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nfixtures\\helpdesk_ai\\src\\helpdesk_ai\\services\\routing.py:41: in route\n    matching_rule = self.rule_engine.get_highest_priority_match(ticket)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nswe_style_eval\\tests\\test_T21_T25_architecture.py:96: in bad_match\n    raise RuntimeError(\"Rule engine failure\")\nE   RuntimeError: Rule engine failure\n\nDuring handling of the above exception, another exception occurred:\nswe_style_eval\\tests\\test_T21_T25_architecture.py:106: in test_routing_handles_rule_engine_errors\n    pytest.fail(\"RuntimeError should be caught and handled\")\nE   Failed: RuntimeError should be caught and handled\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T21_T25_architecture.py::TestInterServiceErrors::test_routing_handles_rule_engine_errors\n======================== 1 failed, 11 passed in 0.25s =========================",
-      "return_code": 1
+      "brief_evidence": []
     },
     "T25": {
-      "pass": false,
+      "pass": true,
+      "prompt_swe": "Ensure services are independent: separate MemoryStore/Config instances must not share state.",
+      "expected_outcome": [
+        "Two MemoryStore instances have independent state",
+        "Two Config instances can have different values",
+        "Services can be instantiated independently"
+      ],
       "passed_tests": [],
       "failed_tests": [],
-      "evidence": "= router.route(sample_ticket)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nfixtures\\helpdesk_ai\\src\\helpdesk_ai\\services\\routing.py:41: in route\n    matching_rule = self.rule_engine.get_highest_priority_match(ticket)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nswe_style_eval\\tests\\test_T21_T25_architecture.py:96: in bad_match\n    raise RuntimeError(\"Rule engine failure\")\nE   RuntimeError: Rule engine failure\n\nDuring handling of the above exception, another exception occurred:\nswe_style_eval\\tests\\test_T21_T25_architecture.py:106: in test_routing_handles_rule_engine_errors\n    pytest.fail(\"RuntimeError should be caught and handled\")\nE   Failed: RuntimeError should be caught and handled\n=========================== short test summary info ===========================\nFAILED swe_style_eval/tests/test_T21_T25_architecture.py::TestInterServiceErrors::test_routing_handles_rule_engine_errors\n======================== 1 failed, 11 passed in 0.30s =========================",
-      "return_code": 1
+      "brief_evidence": []
     }
   }
 }
