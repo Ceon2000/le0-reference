@@ -12,9 +12,13 @@ from pathlib import Path
 from target_vllm import run_prompt, _ensure_model_loaded
 
 
-def execute_one_workflow(flow_file: str, flow_idx: int) -> None:
+def execute_workflow(flow_file: str, flow_idx: int) -> None:
     """
-    Execute a single workflow using target_vllm.run_prompt.
+    Execute a single workflow from an expanded flow file.
+    Context accumulates across steps:
+    - Step 1: instruction + input
+    - Step 2: instruction + input + step1_output
+    - Step 3: instruction + input + step1_output + step2_output
     
     Args:
         flow_file: Path to expanded flow JSON file
@@ -30,22 +34,37 @@ def execute_one_workflow(flow_file: str, flow_idx: int) -> None:
     # Get steps
     steps = flow.get("steps", [])
     
-    # Execute each step sequentially
+    # Track accumulated context from previous steps
+    accumulated_context = ""
+    
+    # Execute each step sequentially, accumulating outputs
     for step in steps:
         step_name = step.get("name", "unknown")
         instruction = step.get("instruction", "")
         
-        # Build prompt: instruction + input
+        # Build prompt: instruction + input + accumulated context from previous steps
         prompt_parts = []
+        
+        # Add accumulated context first (previous step outputs)
+        if accumulated_context:
+            prompt_parts.append(f"## Previous Analysis\n\n{accumulated_context}")
+        
+        # Add current step instruction
         if instruction:
-            prompt_parts.append(f"Instruction: {instruction}")
+            prompt_parts.append(f"## Current Task\n\n{instruction}")
+        
+        # Add original flow input (task description)
         if flow_input:
-            prompt_parts.append(f"Input: {flow_input}")
+            prompt_parts.append(f"## Original Request\n\n{flow_input}")
         
         prompt = "\n\n".join(prompt_parts) if prompt_parts else ""
         
-        # Call run_prompt (standalone path)
-        run_prompt(prompt, step_name, max_tokens=1024, temperature=0.7)
+        # Call run_prompt and capture output for accumulation
+        output_bytes = run_prompt(prompt, step_name, max_tokens=1024, temperature=0.7)
+        
+        # Accumulate this step's output for subsequent steps
+        output_text = output_bytes.decode('utf-8', errors='replace') if output_bytes else ""
+        accumulated_context += f"\n\n### {step_name.title()} Output\n\n{output_text}"
 
 
 def execute_standalone(num_flows: int = 25) -> None:
@@ -81,7 +100,7 @@ def execute_standalone(num_flows: int = 25) -> None:
         print(f"[RUNNER] WORKFLOW_{i}_START pid={os.getpid()}", file=sys.stderr)
         
         workflow_start = time.time()
-        execute_one_workflow(flow_file, i)
+        execute_workflow(flow_file, i)
         workflow_time = time.time() - workflow_start
         workflow_times.append(workflow_time)
         print(f"[TIMING] workflow_{i}_ms={workflow_time * 1000:.2f}", file=sys.stderr)
