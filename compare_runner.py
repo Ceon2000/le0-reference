@@ -80,7 +80,7 @@ def run_treatment(num_tasks, tasks):
     tracker = SnippetTracker()
     totals = {
         "client_tokens": 0, "output_tokens": 0, "latency_ms": 0, "energy_j": 0,
-        "prefill_ms": 0, "decode_ms": 0, "prefill_tokens_computed": 0, "reused_tokens": 0,
+        "prefill_ms": 0, "decode_ms": 0, "prefill_tokens_computed": 0, "reused_tokens": None,
     }
     total_avoided = 0
     all_tasks = []
@@ -106,7 +106,10 @@ def run_treatment(num_tasks, tasks):
             task["prefill_ms"] += metrics.get("prefill_ms", 0)
             task["decode_ms"] += metrics.get("decode_ms", 0)
             totals["prefill_tokens_computed"] += metrics.get("prefill_tokens_computed", 0)
-            totals["reused_tokens"] += metrics.get("reused_tokens", 0)
+            # Handle None for reused_tokens (N/A if wheel doesn't expose it)
+            step_reused = metrics.get("reused_tokens")
+            if step_reused is not None:
+                totals["reused_tokens"] = (totals["reused_tokens"] or 0) + step_reused
             totals["energy_j"] += metrics.get("energy_j", 0)
         
         new_count = sum(1 for l in lookups if l["snippet_id"] in tracker.seen_ids)  # After processing
@@ -195,9 +198,11 @@ def print_comparison(baseline, treatment, num_tasks, elapsed):
     b_prefill_computed = baseline.get('total_prefill_tokens_computed', baseline['total_client_tokens'])
     t_prefill_computed = treatment.get('total_prefill_tokens_computed', treatment['total_client_tokens'])
     print(f"{'Prefill Tokens Computed':<45} {b_prefill_computed:>20,} {t_prefill_computed:>20,}", file=sys.stderr)
-    b_reused = baseline.get('total_reused_tokens', 0)
-    t_reused = treatment.get('total_reused_tokens', 0)
-    print(f"{'Reused Tokens (cache hit)':<45} {b_reused:>20,} {t_reused:>20,}", file=sys.stderr)
+    b_reused = baseline.get('total_reused_tokens')
+    t_reused = treatment.get('total_reused_tokens')
+    b_reused_str = "N/A" if b_reused is None else f"{b_reused:,}"
+    t_reused_str = "N/A" if t_reused is None else f"{t_reused:,}"
+    print(f"{'Reused Tokens (KV cache)':<45} {b_reused_str:>20} {t_reused_str:>20}", file=sys.stderr)
     
     # Energy
     print("-" * W, file=sys.stderr)
@@ -244,11 +249,12 @@ def print_comparison(baseline, treatment, num_tasks, elapsed):
     print(f"  Token Reduction:       {token_reduction_pct:.1f}%", file=sys.stderr)
     print(f"  Prefill Time Reduction:{prefill_reduction_pct:.1f}%", file=sys.stderr)
     print(f"  Snippet Avoided Tokens:{avoided_tokens:,}", file=sys.stderr)
-    print(f"  Reused Tokens (KV):    {treatment_reused:,} {'(N/A - not exposed by wheel)' if treatment_reused == 0 else ''}", file=sys.stderr)
+    reused_str = "N/A" if treatment_reused is None else f"{treatment_reused:,}"
+    print(f"  Reused Tokens (KV):    {reused_str}", file=sys.stderr)
     print("-" * W, file=sys.stderr)
     
     # Interpret the results correctly
-    if treatment_reused > 0:
+    if treatment_reused is not None and treatment_reused > 0:
         # Actual KV reuse detected
         print("  ✅ KV Cache Reuse: reused_tokens > 0 indicates compute-bound savings", file=sys.stderr)
     elif avoided_tokens > 0 and abs(prefill_reduction_pct - token_reduction_pct) < 10:

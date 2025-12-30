@@ -313,16 +313,18 @@ def run_prompt(
     energy_j = power_w * (total_latency_ms / 1000.0)
     
     # Baseline: prefill_tokens_computed = prompt_tokens (no reuse)
-    # Treatment would report lower prefill_tokens_computed if reuse is real
+    # For treatment: the LE-0 wheel would return actual reused_tokens if available
+    # Since we are the baseline target, we set reused_tokens to None to indicate "not available"
     prefill_tokens_computed = prompt_tokens
-    reused_tokens = 0
+    reused_tokens = None  # N/A - wheel does not expose this metric
     
     # Log metrics with prefill/decode breakdown (IP-safe: no text output)
+    reused_str = "N/A" if reused_tokens is None else str(reused_tokens)
     print(
         f"[TARGET] flow={flow_idx} step={step_name} "
         f"latency_ms={total_latency_ms:.2f} prefill_ms={prefill_ms:.2f} decode_ms={decode_ms:.2f} "
         f"prompt_tokens={prompt_tokens} decode_tokens={decode_tokens} "
-        f"prefill_tokens_computed={prefill_tokens_computed} reused_tokens={reused_tokens} "
+        f"prefill_tokens_computed={prefill_tokens_computed} reused_tokens={reused_str} "
         f"power_w={power_w:.2f} energy_j={energy_j:.2f}",
         file=sys.stderr
     )
@@ -338,7 +340,7 @@ def run_prompt(
         "prefill_ms": prefill_ms,
         "decode_ms": decode_ms,
         "prefill_tokens_computed": prefill_tokens_computed,
-        "reused_tokens": reused_tokens,
+        "reused_tokens": reused_tokens,  # None = not available from wheel
         "power_w": power_w,
         "energy_j": energy_j,
     }
