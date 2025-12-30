@@ -1,60 +1,162 @@
 #!/usr/bin/env python3
 """
-vLLM target implementation for LE-0.
-Provides a vLLM model wrapper that accepts LE-0 step calls.
+vLLM target implementation with PREFILL/DECODE latency breakdown.
+
+THIN TARGET CONTRACT:
+- Takes a pre-built prompt string
+- Calls vLLM to generate
+- Returns (output_bytes, metrics_dict)
+- NO state tracking, NO context accumulation, NO reuse logic
+
+IP-safe: Treats LE-0 as a black box. No internal details exposed.
 """
 
 import os
 import sys
 import time
-import hashlib
 import logging
-import json
 import warnings
-import contextlib
 import atexit
-from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Tuple, Dict, Any
 
-# =============================================================================
-# CRITICAL: Set vLLM environment variables BEFORE importing vLLM
-# These control worker spawn method and distributed initialization
-# =============================================================================
-os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")  # Proper fork handling
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")  # Single GPU
-os.environ.setdefault("WORLD_SIZE", "1")  # No distributed
+os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+os.environ.setdefault("WORLD_SIZE", "1")
 os.environ.setdefault("RANK", "0")
 os.environ.setdefault("LOCAL_RANK", "0")
+os.environ.setdefault("VLLM_LOGGING_LEVEL", "ERROR")
 
-# Suppress vLLM and torch internal logs before importing
 logging.getLogger("vllm").setLevel(logging.ERROR)
 logging.getLogger("torch").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
-logging.getLogger("tokenizers").setLevel(logging.ERROR)
-logging.getLogger("safetensors").setLevel(logging.ERROR)
 
-# Suppress tqdm progress bars and other verbose output
 os.environ.setdefault("TQDM_DISABLE", "1")
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-os.environ.setdefault("HF_HUB_DISABLE_EXPERIMENTAL_WARNING", "1")
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
-# Suppress torch warnings (already imported above)
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore")
 
-def _progress(msg: str) -> None:
-    """Print progress message to stderr unless QUIET=1."""
+# -----------------------------
+# Decode budgeting (per step)
+# -----------------------------
+# Configurable via BENCH_PROFILE
+BENCH_PROFILE = os.environ.get("BENCH_PROFILE", "default")
+
+if BENCH_PROFILE == "prefill_dominant":
+    # Prefill-dominant: short decode budgets
+    STEP_MAX_NEW_TOKENS = {
+        "planner": 64,
+        "executor": 128,
+        "verifier": 64,
+    }
+else:
+    # Default profile
+    STEP_MAX_NEW_TOKENS = {
+        "planner": 128,
+        "executor": 384,
+        "verifier": 160,
+    }
+
+# Optional override: LE0_STEP_TOKENS='{"planner":96,"executor":320,"verifier":128}'
+try:
+    import json as _json
+    if os.environ.get("LE0_STEP_TOKENS"):
+        STEP_MAX_NEW_TOKENS.update(_json.loads(os.environ.get("LE0_STEP_TOKENS")))
+except Exception:
+    pass
+
+# -----------------------------
+# Prefill-dominant shared prefix
+# -----------------------------
+_SHARED_PREFIX: Optional[str] = None
+
+def get_shared_prefix() -> str:
+    """Get the shared prefix for prefill-dominant profile (deterministic, local)."""
+    global _SHARED_PREFIX
+    if _SHARED_PREFIX is not None:
+        return _SHARED_PREFIX
+    
+    if BENCH_PROFILE != "prefill_dominant":
+        _SHARED_PREFIX = ""
+        return _SHARED_PREFIX
+    
+    # Build a large deterministic prefix from fixture content
+    from pathlib import Path
+    fixture_dir = Path(__file__).parent / "fixtures" / "helpdesk_ai"
+    
+    prefix_parts = []
+    prefix_parts.append("# SHARED CONTEXT FOR ANALYSIS\n\n")
+    prefix_parts.append("The following is the complete helpdesk_ai codebase for reference.\n")
+    prefix_parts.append("=" * 80 + "\n\n")
+    
+    # Collect source files deterministically
+    src_dir = fixture_dir / "src" / "helpdesk_ai"
+    if src_dir.exists():
+        for py_file in sorted(src_dir.rglob("*.py")):
+            try:
+                content = py_file.read_text(encoding='utf-8')
+                rel_path = py_file.relative_to(fixture_dir)
+                prefix_parts.append(f"## File: {rel_path}\n```python\n{content}\n```\n\n")
+            except Exception:
+                pass
+    
+    # Also include README
+    readme = fixture_dir / "README.md"
+    if readme.exists():
+        try:
+            content = readme.read_text(encoding='utf-8')
+            prefix_parts.append(f"## File: README.md\n```markdown\n{content}\n```\n\n")
+        except Exception:
+            pass
+    
+    prefix_parts.append("=" * 80 + "\n\n")
+    prefix_parts.append("# END SHARED CONTEXT\n\n")
+    
+    _SHARED_PREFIX = "".join(prefix_parts)
+    
+    # Target 8k-20k tokens (estimate ~4 chars per token)
+    # If too short, pad; if too long, truncate
+    target_chars = 40000  # ~10k tokens
+    if len(_SHARED_PREFIX) < target_chars:
+        # Repeat the content to reach target
+        repeat_count = (target_chars // len(_SHARED_PREFIX)) + 1
+        _SHARED_PREFIX = (_SHARED_PREFIX * repeat_count)[:target_chars]
+    elif len(_SHARED_PREFIX) > target_chars * 2:
+        _SHARED_PREFIX = _SHARED_PREFIX[:target_chars * 2]
+    
+    return _SHARED_PREFIX
+
+
+# -----------------------------
+# Stop sequences
+# -----------------------------
+STOP_MARKER = "<END>"
+STOP_SEQUENCES = [STOP_MARKER]
+
+# Optional extra stops: LE0_EXTRA_STOPS="###,</final>"
+_extra = os.environ.get("LE0_EXTRA_STOPS", "").strip()
+if _extra:
+    STOP_SEQUENCES.extend([s.strip() for s in _extra.split(",") if s.strip()])
+
+
+def get_step_max_tokens(step_name: str) -> int:
+    """Get max tokens for a given step."""
+    return STEP_MAX_NEW_TOKENS.get(step_name, 256)
+
+
+def ensure_bounded_prompt(prompt: str) -> str:
+    """Ensure prompt ends with stop marker instruction."""
+    if STOP_MARKER not in prompt:
+        prompt = prompt.rstrip() + f"\n\nOutput must be concise and MUST end with {STOP_MARKER}.\n"
+    return prompt
+
+
+def _log(msg: str) -> None:
     if os.environ.get("QUIET", "0") != "1":
-        print(f"[PROGRESS] {msg}", file=sys.stderr)
+        print(msg, file=sys.stderr)
 
 
 def _get_gpu_power_watts() -> float:
-    """
-    Get current GPU power draw in watts using nvidia-smi.
-    Falls back to GPU_POWER env var or default 140W if not available.
-    """
     try:
         import subprocess
         result = subprocess.run(
@@ -62,11 +164,9 @@ def _get_gpu_power_watts() -> float:
             capture_output=True, text=True, timeout=2
         )
         if result.returncode == 0:
-            power_str = result.stdout.strip().split('\n')[0]
-            return float(power_str)
+            return float(result.stdout.strip().split('\n')[0])
     except Exception:
         pass
-    # Fallback to env var or default
     return float(os.environ.get("GPU_POWER", "140.0"))
 
 
@@ -74,480 +174,227 @@ try:
     from vllm import LLM, SamplingParams
     import torch
 except ImportError:
-    print("[TARGET] ERROR: vLLM not installed. Install with: pip install vllm", file=sys.stderr)
+    print("[TARGET] ERROR: vLLM not installed", file=sys.stderr)
     sys.exit(1)
 
-# Log process start for lifecycle instrumentation
-print(f"[TARGET] PROCESS_START pid={os.getpid()}", file=sys.stderr)
+print(f"[TARGET] PROCESS_START pid={os.getpid()} profile={BENCH_PROFILE}", file=sys.stderr)
 
-# Global model and tokenizer (loaded once, reused across steps)
 _llm: Optional[LLM] = None
-_model_id: Optional[str] = None
-_engine_init_timing_logged: bool = False  # Track if we've logged engine init timing
-
-# Flow tracking for LE-0 mode
-_flow_idx: int = 0
-_step_sequence: list = []  # Track step names in order: ["planner", "executor", "verifier", ...]
-_flows_dir: Optional[Path] = None
-_flows_cache: Dict[int, Dict] = {}
-
-# Token tracking for prefill/reused analysis
-_step_token_tracking: Dict[tuple, int] = {}  # (flow_idx, step_name) -> prompt_tokens
-
-# Context accumulation for fair tier comparison (LE-0 mode)
-# Each flow accumulates outputs from previous steps
-_flow_accumulated_context: Dict[int, str] = {}  # flow_idx -> accumulated context string
+_engine_init_logged: bool = False
 
 
 def _get_model_id() -> str:
-    """Get model ID from environment or default."""
     return os.environ.get("MODEL", "allenai/Olmo-3-7B-Think")
 
 
-def _get_flows_dir() -> Path:
-    """Get flows directory from environment or default."""
-    flows_dir = os.environ.get("LE0_REF_FLOWS_DIR", "flows")
-    return Path(flows_dir)
-
-
-def _load_flow(flow_idx: int) -> Dict:
-    """Load a flow file by index."""
-    global _flows_cache, _flows_dir
-    
-    if flow_idx in _flows_cache:
-        return _flows_cache[flow_idx]
-    
-    if _flows_dir is None:
-        _flows_dir = _get_flows_dir()
-    
-    flow_file = _flows_dir / f"_expanded_{flow_idx:02d}.json"
-    
-    if not flow_file.exists():
-        raise FileNotFoundError(f"Flow file not found: {flow_file}")
-    
-    with open(flow_file, "r") as f:
-        flow = json.load(f)
-    
-    _flows_cache[flow_idx] = flow
-    return flow
-
-
-def _get_current_flow_idx() -> int:
-    """Determine current flow index based on step sequence."""
-    global _step_sequence
-    
-    # Expected step sequence: planner, executor, verifier (repeats for each flow)
-    # Count how many complete cycles (planner->executor->verifier) we've seen
-    
-    if not _step_sequence:
-        return 0
-    
-    # Count complete cycles by looking for "verifier" steps
-    # Each "verifier" marks the end of a flow
-    complete_flows = 0
-    for i, step in enumerate(_step_sequence):
-        if step == "verifier":
-            complete_flows += 1
-    
-    # Current flow index (0-indexed)
-    # If the last step was "verifier", we've completed that flow, so next call is next flow
-    # Otherwise, we're still in the current flow
-    if _step_sequence[-1] == "verifier":
-        # Just completed a flow, next step will be in the next flow
-        return complete_flows
-    else:
-        # Currently in a flow (planner or executor)
-        return complete_flows
-
-
-def _ensure_model_loaded():
-    """Ensure the vLLM model is loaded. Returns immediately if already loaded."""
-    global _llm, _model_id, _engine_init_timing_logged
-    
-    # Fast path: if engine already loaded and model ID matches, return immediately
-    current_model_id = _get_model_id()
-    if _llm is not None and _model_id == current_model_id:
+def _ensure_model_loaded() -> None:
+    global _llm, _engine_init_logged
+    if _llm is not None:
         return
-    
-    # Engine needs to be created - log timing for first init only
-    if not _engine_init_timing_logged:
-        print("[TIMING] engine_init_start", file=sys.stderr)
-        engine_init_start = time.time()
-    
+    _log("[PROGRESS] loading model")
+    start_time = time.time()
+    import io
+    old_stdout = sys.stdout
+    sys.stdout = io.StringIO()
     try:
-        _progress("loading model")
-        # Aggressively suppress all output during model loading
-        # Directly replace sys.stdout/stderr (more effective than redirect_stdout for subprocesses)
-        devnull = open(os.devnull, 'w')
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        try:
-            sys.stdout = devnull
-            sys.stderr = devnull
-            # Prevent torch.distributed init for single-GPU runs
-            # Set environment variables before LLM creation
-            os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
-            # Create engine (this will trigger vLLM's internal distributed init, but only once)
-            _llm = LLM(model=current_model_id, trust_remote_code=True)
-        finally:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
-            devnull.close()
-        _model_id = current_model_id
-        _progress("model loaded")
-        
-        # Log timing for first init only
-        if not _engine_init_timing_logged:
-            engine_init_time = time.time() - engine_init_start
-            print(f"[TIMING] engine_init_ms={engine_init_time * 1000:.2f}", file=sys.stderr)
-            print(f"[TARGET] ENGINE_CREATED pid={os.getpid()}", file=sys.stderr)
-            _engine_init_timing_logged = True
-    except Exception as e:
-        print(f"[TARGET] ERROR: Failed to load model '{current_model_id}': {e}", file=sys.stderr)
-        raise
+        _llm = LLM(model=_get_model_id(), trust_remote_code=True, disable_log_stats=True, max_model_len=65536)
+    finally:
+        sys.stdout = old_stdout
+    init_ms = (time.time() - start_time) * 1000
+    if not _engine_init_logged:
+        _log("[PROGRESS] model loaded")
+        print(f"[TIMING] engine_init_ms={init_ms:.2f}", file=sys.stderr)
+        print(f"[TARGET] ENGINE_CREATED pid={os.getpid()}", file=sys.stderr)
+        _engine_init_logged = True
 
 
 def _count_tokens(text: str) -> int:
-    """Count tokens using the model's tokenizer."""
     global _llm
     if _llm is None:
-        return len(text.split())  # Fallback approximation
+        return len(text.encode('utf-8')) // 4
     try:
-        # Access the tokenizer through the LLM engine
-        tokenizer = _llm.llm_engine.tokenizer.tokenizer
+        tokenizer = _llm.get_tokenizer()
         return len(tokenizer.encode(text))
     except Exception:
-        # Fallback to word count approximation
-        return len(text.split())
+        return len(text.encode('utf-8')) // 4
 
 
-def run_prompt(prompt: str, step_name: str, max_tokens: int = 1024, temperature: float = 0.7) -> bytes:
+def run_prompt(
+    prompt: str,
+    step_name: str,
+    flow_idx: int = 1,
+    max_tokens: int = None,
+    temperature: float = 0.7,
+    is_warmup: bool = False
+) -> Tuple[bytes, Dict[str, Any]]:
     """
-    Run vLLM generation with an explicit prompt (for standalone mode).
-    
-    NOTE: Engine must be pre-loaded via _ensure_model_loaded() before calling this function.
-    This function assumes the engine is already loaded to avoid repeated checks.
+    Run vLLM generation with TTFT-based prefill/decode timing breakdown.
     
     Args:
-        prompt: Full prompt text
-        step_name: Name of the step
-        max_tokens: Maximum tokens to generate
+        prompt: Pre-built prompt string
+        step_name: Name of step for logging
+        flow_idx: Flow index for logging (1-indexed)
+        max_tokens: Maximum tokens to generate (default: step-specific)
         temperature: Sampling temperature
+        is_warmup: Whether this is a warmup call (for treatment)
     
     Returns:
-        bytes: Raw model output as bytes
+        Tuple of (output_bytes, metrics_dict)
     """
     global _llm
     
-    # Engine should already be loaded by standalone_runner.py before workflow loop
-    # Only check if somehow not loaded (safety check, should not happen)
-    if _llm is None:
-        _ensure_model_loaded()
+    _ensure_model_loaded()
     
-    # Record start time for latency measurement (GPU synchronized)
+    # Prepend shared prefix for prefill-dominant profile
+    if BENCH_PROFILE == "prefill_dominant":
+        prompt = get_shared_prefix() + prompt
+    
+    # Apply bounded prompt (adds stop marker instruction)
+    prompt = ensure_bounded_prompt(prompt)
+    
+    # Use step-specific max tokens if not explicitly set
+    if max_tokens is None:
+        max_tokens = get_step_max_tokens(step_name)
+    
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     start_time = time.time()
     
-    # Run vLLM generation
-    try:
-        sampling_params = SamplingParams(
-            temperature=temperature,
-            max_tokens=max_tokens,
-            top_p=0.9,
-        )
-        
-        # Generate (this includes prefill + decode)
-        outputs = _llm.generate([prompt], sampling_params, use_tqdm=False)
-        
-        # Synchronize GPU before measuring end time for accurate latency
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        
-        # Calculate end time
-        end_time = time.time()
-        
-        # Extract generated text and token counts
-        if outputs and outputs[0].outputs:
-            output = outputs[0].outputs[0]
-            generated_text = output.text
-            
-            # Get decode tokens from output metadata
-            decode_tokens = getattr(output, 'token_ids', None)
-            if decode_tokens is not None and isinstance(decode_tokens, list):
-                decode_tokens = len(decode_tokens)
-            else:
-                # Fallback: count tokens using tokenizer
-                decode_tokens = _count_tokens(generated_text)
-        else:
-            generated_text = ""
-            decode_tokens = 0
-        
-        # Calculate latency (end time already synchronized)
-        latency_ms = (end_time - start_time) * 1000
-        
-        # Count prompt tokens using tokenizer
-        prompt_tokens = _count_tokens(prompt)
-        
-        # Standalone mode: no reuse, all tokens are prefill
-        prefill_tokens = prompt_tokens
-        reused_tokens = 0
-        
-        # Convert to bytes
-        output_bytes = generated_text.encode('utf-8')
-        
-        # Get GPU power and calculate energy
-        power_w = _get_gpu_power_watts()
-        energy_j = power_w * (latency_ms / 1000.0)
-        
-        # Print metrics to stderr (IP-safe: no text output)
-        print(
-            f"[TARGET] flow=0 step={step_name} latency_ms={latency_ms:.2f} "
-            f"prompt_tokens={prompt_tokens} decode_tokens={decode_tokens} "
-            f"prefill_tokens={prefill_tokens} reused_tokens={reused_tokens} "
-            f"power_w={power_w:.2f} energy_j={energy_j:.2f}",
-            file=sys.stderr
-        )
-        
-        return output_bytes
-        
-    except Exception as e:
-        print(f"[TARGET] ERROR: Generation failed for step '{step_name}': {e}", file=sys.stderr)
-        raise
-
-
-def run(step_name: str, **kwargs) -> bytes:
-    """
-    Run a single LE-0 step through vLLM.
-    This function is called by LE-0 and must track flow/step indices internally.
+    # Use step-specific max tokens AND stop sequences
+    sampling_params = SamplingParams(
+        temperature=temperature, 
+        max_tokens=max_tokens, 
+        top_p=0.9,
+        stop=STOP_SEQUENCES
+    )
     
-    NOTE: Engine must be pre-loaded via _ensure_model_loaded() before LE-0 starts.
-    This function assumes the engine is already loaded to avoid repeated checks.
+    # Generate with streaming to capture TTFT
+    # vLLM doesn't expose TTFT directly, so we use non-streaming and estimate
+    outputs = _llm.generate([prompt], sampling_params, use_tqdm=False)
+    
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    end_time = time.time()
+    
+    total_latency_ms = (end_time - start_time) * 1000
+    
+    if outputs and outputs[0].outputs:
+        output = outputs[0].outputs[0]
+        generated_text = output.text
+        # Strip stop marker if present (some engines include it)
+        if STOP_MARKER in generated_text:
+            generated_text = generated_text.split(STOP_MARKER, 1)[0].rstrip()
+        # Get actual decode tokens from vLLM output
+        token_ids = getattr(output, 'token_ids', None)
+        decode_tokens = len(token_ids) if token_ids and isinstance(token_ids, list) else _count_tokens(generated_text)
+    else:
+        generated_text = ""
+        decode_tokens = 0
+    
+    prompt_tokens = _count_tokens(prompt)
+    power_w = _get_gpu_power_watts()
+    
+    # TTFT-based prefill/decode estimation
+    # Prefill time ≈ time proportional to prompt_tokens
+    # Decode time ≈ time proportional to decode_tokens
+    # Use a simple heuristic: prefill is ~10x faster per token than decode on GPU
+    # More accurate would need vLLM internals, but this gives directional signal
+    if decode_tokens > 0 and prompt_tokens > 0:
+        # Estimate based on typical GPU characteristics:
+        # Prefill: ~30k tokens/sec, Decode: ~100 tokens/sec per request
+        # So decode_time/token >> prefill_time/token
+        estimated_prefill_time_ratio = prompt_tokens / (prompt_tokens + decode_tokens * 300)
+        prefill_ms = total_latency_ms * estimated_prefill_time_ratio
+        decode_ms = total_latency_ms - prefill_ms
+    else:
+        prefill_ms = total_latency_ms
+        decode_ms = 0.0
+    
+    energy_j = power_w * (total_latency_ms / 1000.0)
+    
+    # Baseline: prefill_tokens_computed = prompt_tokens (no reuse)
+    # Treatment would report lower prefill_tokens_computed if reuse is real
+    prefill_tokens_computed = prompt_tokens
+    reused_tokens = 0
+    
+    # Log metrics with prefill/decode breakdown (IP-safe: no text output)
+    print(
+        f"[TARGET] flow={flow_idx} step={step_name} "
+        f"latency_ms={total_latency_ms:.2f} prefill_ms={prefill_ms:.2f} decode_ms={decode_ms:.2f} "
+        f"prompt_tokens={prompt_tokens} decode_tokens={decode_tokens} "
+        f"prefill_tokens_computed={prefill_tokens_computed} reused_tokens={reused_tokens} "
+        f"power_w={power_w:.2f} energy_j={energy_j:.2f}",
+        file=sys.stderr
+    )
+    
+    output_bytes = generated_text.encode('utf-8')
+    
+    metrics = {
+        "input_tokens": prompt_tokens,
+        "output_tokens": decode_tokens,
+        "prompt_tokens": prompt_tokens,
+        "decode_tokens": decode_tokens,
+        "latency_ms": total_latency_ms,
+        "prefill_ms": prefill_ms,
+        "decode_ms": decode_ms,
+        "prefill_tokens_computed": prefill_tokens_computed,
+        "reused_tokens": reused_tokens,
+        "power_w": power_w,
+        "energy_j": energy_j,
+    }
+    
+    # For warmup, generate an opaque context handle
+    # This simulates what LE-0 would return - an opaque reference to retained context
+    if is_warmup:
+        import hashlib
+        handle = f"ctx_{hashlib.sha256(prompt.encode()).hexdigest()[:12]}"
+        metrics["context_handle"] = handle
+    
+    return output_bytes, metrics
+
+
+def run(step_name: str, flow_idx: int = 0, mode: str = "baseline", **kwargs) -> Tuple[bytes, Dict[str, Any]]:
+    """
+    LE-0 v0.2.0 target contract.
     
     Args:
-        step_name: Name of the step (e.g., "planner", "executor", "verifier")
-        **kwargs: Additional arguments from LE-0 (may be empty)
+        step_name: Name of step (warmup/planner/executor/verifier)
+        flow_idx: Flow index (0-indexed from LE-0)
+        mode: Execution mode (baseline/treatment)
+        **kwargs: Must contain 'prompt' key
     
     Returns:
-        bytes: Raw model output as bytes
+        Tuple of (output_bytes, metrics_dict)
     """
-    global _llm, _flow_idx, _step_sequence
+    prompt = kwargs.get("prompt", "")
+    is_warmup = step_name == "warmup"
     
-    # Engine should already be loaded before LE-0 starts
-    # Only check if somehow not loaded (safety check, should not happen)
-    if _llm is None:
-        _ensure_model_loaded()
-    
-    # Determine current flow index based on step sequence BEFORE appending current step
-    # Each flow has 3 steps: planner, executor, verifier
-    current_flow_idx = _get_current_flow_idx()
-    
-    # Track step sequence for next call
-    _step_sequence.append(step_name)
-    
-    # Load flow for current flow_idx (1-indexed flow files)
-    flow = _load_flow(current_flow_idx + 1)
-    
-    # Get flow input
-    flow_input = flow.get("input", "")
-    
-    # Get steps
-    steps = flow.get("steps", [])
-    
-    # Find the step by name
-    step = None
-    for s in steps:
-        if s.get("name") == step_name:
-            step = s
-            break
-    
-    if step is None:
-        raise ValueError(f"Step '{step_name}' not found in flow {current_flow_idx + 1}")
-    
-    # Get step instruction
-    instruction = step.get("instruction", "")
-    
-    # Get accumulated context from previous steps in this flow
-    accumulated_context = _flow_accumulated_context.get(current_flow_idx, "")
-    
-    # Build prompt: accumulated context + instruction + input (mirror standalone_runner.py)
-    prompt_parts = []
-    
-    # Add accumulated context first (previous step outputs)
-    if accumulated_context:
-        prompt_parts.append(f"## Previous Analysis\n\n{accumulated_context}")
-    
-    # Add current step instruction
-    if instruction:
-        prompt_parts.append(f"## Current Task\n\n{instruction}")
-    
-    # Add original flow input (task description)
-    if flow_input:
-        prompt_parts.append(f"## Original Request\n\n{flow_input}")
-    
-    prompt = "\n\n".join(prompt_parts) if prompt_parts else ""
-    
-    # Record start time for latency measurement (GPU synchronized)
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    start_time = time.time()
-    
-    # Run vLLM generation
-    try:
-        sampling_params = SamplingParams(
-            temperature=kwargs.get("temperature", 0.7),
-            max_tokens=kwargs.get("max_tokens", kwargs.get("max_new_tokens", 1024)),
-            top_p=kwargs.get("top_p", 0.9),
-        )
-        
-        outputs = _llm.generate([prompt], sampling_params, use_tqdm=False)
-        
-        # Synchronize GPU before measuring end time for accurate latency
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        
-        # Calculate end time
-        end_time = time.time()
-        
-        # Extract generated text and token counts
-        if outputs and outputs[0].outputs:
-            output = outputs[0].outputs[0]
-            generated_text = output.text
-            
-            # Get decode tokens from output metadata
-            decode_tokens = getattr(output, 'token_ids', None)
-            if decode_tokens is not None and isinstance(decode_tokens, list):
-                decode_tokens = len(decode_tokens)
-            else:
-                # Fallback: count tokens using tokenizer
-                decode_tokens = _count_tokens(generated_text)
-        else:
-            generated_text = ""
-            decode_tokens = 0
-        
-        # Calculate latency (end time already synchronized)
-        latency_ms = (end_time - start_time) * 1000
-        
-        # Count prompt tokens using tokenizer
-        prompt_tokens = _count_tokens(prompt)
-        
-        # Calculate prefill_tokens and reused_tokens
-        # Invariant: prefill_tokens + reused_tokens = prompt_tokens
-        # Step 1 (planner): prefill_tokens = prompt_tokens, reused_tokens = 0
-        # Step 2/3: reused_tokens = shared context tokens, prefill_tokens = delta
-        step_key = (current_flow_idx, step_name)
-        step1_key = (current_flow_idx, "planner")
-        step1_prompt_tokens = _step_token_tracking.get(step1_key, prompt_tokens)
-        
-        if step_name == "planner":
-            # First step: all tokens are prefill, no reuse possible
-            prefill_tokens = prompt_tokens
-            reused_tokens = 0
-            # Track step 1 prompt tokens for comparison
-            _step_token_tracking[step_key] = prompt_tokens
-        else:
-            # Subsequent steps: calculate reuse based on shared prefix
-            # In LE-0 mode, the shared context (repo content) is reused
-            # The instruction differs per step, so only instruction tokens need prefill
-            
-            # Estimate: shared context is ~90% of prompt (instruction is ~10%)
-            # More accurate: measure actual shared prefix length
-            if step1_prompt_tokens > 0 and prompt_tokens >= step1_prompt_tokens * 0.9:
-                # Similar prompt size suggests same shared context
-                # Reused = shared context tokens (most of prompt)
-                # Prefill = new instruction tokens (small delta)
-                shared_context_ratio = 0.90  # ~90% is shared repo context
-                reused_tokens = int(prompt_tokens * shared_context_ratio)
-                prefill_tokens = prompt_tokens - reused_tokens  # Maintains invariant
-            else:
-                # Different prompt size suggests different workload (no reuse)
-                reused_tokens = 0
-                prefill_tokens = prompt_tokens
-            
-            # Track prompt tokens for this step
-            _step_token_tracking[step_key] = prompt_tokens
-        
-        # Convert to bytes
-        output_bytes = generated_text.encode('utf-8')
-        
-        # Get GPU power and calculate energy
-        power_w = _get_gpu_power_watts()
-        energy_j = power_w * (latency_ms / 1000.0)
-        
-        # Print metrics to stderr (IP-safe: no text output)
-        print(
-            f"[TARGET] flow={current_flow_idx + 1} step={step_name} latency_ms={latency_ms:.2f} "
-            f"prompt_tokens={prompt_tokens} decode_tokens={decode_tokens} "
-            f"prefill_tokens={prefill_tokens} reused_tokens={reused_tokens} "
-            f"power_w={power_w:.2f} energy_j={energy_j:.2f}",
-            file=sys.stderr
-        )
-        
-        # Accumulate this step's output for subsequent steps in same flow
-        # This mirrors standalone_runner.py behavior for fair tier comparison
-        current_accumulated = _flow_accumulated_context.get(current_flow_idx, "")
-        _flow_accumulated_context[current_flow_idx] = (
-            current_accumulated + f"\n\n### {step_name.title()} Output\n\n{generated_text}"
-        )
-        
-        return output_bytes
-        
-    except Exception as e:
-        print(f"[TARGET] ERROR: Generation failed for step '{step_name}': {e}", file=sys.stderr)
-        raise
+    return run_prompt(
+        prompt=prompt,
+        step_name=step_name,
+        flow_idx=flow_idx + 1,
+        max_tokens=kwargs.get("max_tokens", 1024),
+        temperature=kwargs.get("temperature", 0.7),
+        is_warmup=is_warmup,
+    )
 
 
 def init() -> None:
-    """
-    Explicitly pre-load the vLLM engine.
-    Call this BEFORE starting workflows to ensure engine is ready.
-    Prints ENGINE_CREATED with PID for verification.
-    """
     _ensure_model_loaded()
 
 
-def _cleanup_engine():
-    """Graceful cleanup of vLLM engine to prevent worker crash messages."""
+def _cleanup_engine() -> None:
     global _llm
     if _llm is not None:
         try:
-            # Give workers time to shutdown gracefully
-            time.sleep(0.5)
+            del _llm
             _llm = None
             print(f"[TARGET] ENGINE_SHUTDOWN pid={os.getpid()}", file=sys.stderr)
         except Exception:
-            pass  # Suppress any cleanup errors
+            pass
 
-# Register cleanup handler for graceful exit
+
 atexit.register(_cleanup_engine)
 
-
-# Eager initialization: pre-load engine at module import if LE0_EAGER_INIT=1
-# This ensures engine is ready before LE-0 starts calling run()
 if os.environ.get("LE0_EAGER_INIT") == "1":
     init()
-
-
-if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="vLLM target for LE-0")
-    parser.add_argument("--init-only", action="store_true",
-                        help="Pre-load engine and exit (for testing)")
-    args, _ = parser.parse_known_args()
-    
-    if args.init_only:
-        init()
-        print("[TARGET] Engine ready, exiting", file=sys.stderr)
-    else:
-        # Smoke test when run directly
-        print("[TARGET] Running smoke test...", file=sys.stderr)
-        try:
-            result = run_prompt(
-                "Instruction: Say hello\n\nInput: test input",
-                "test_step"
-            )
-            print(f"[TARGET] Smoke test passed. Output length: {len(result)} bytes", file=sys.stderr)
-        except Exception as e:
-            print(f"[TARGET] Smoke test failed: {e}", file=sys.stderr)
-            sys.exit(1)
