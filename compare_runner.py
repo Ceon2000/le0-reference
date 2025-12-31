@@ -22,7 +22,7 @@ def run_baseline(num_tasks, tasks):
     """Run baseline mode, collecting detailed metrics including prefill/decode breakdown."""
     totals = {
         "client_tokens": 0, "output_tokens": 0, "latency_ms": 0, "energy_j": 0,
-        "prefill_ms": 0, "decode_ms": 0, "prefill_tokens_computed": 0, "reused_tokens": 0,
+        "prefill_ms": 0, "decode_ms": 0, "prefill_tokens_computed": 0, "reused_tokens": None,
     }
     all_tasks = []
     
@@ -42,7 +42,10 @@ def run_baseline(num_tasks, tasks):
             task["prefill_ms"] += metrics.get("prefill_ms", 0)
             task["decode_ms"] += metrics.get("decode_ms", 0)
             totals["prefill_tokens_computed"] += metrics.get("prefill_tokens_computed", 0)
-            totals["reused_tokens"] += metrics.get("reused_tokens", 0)
+            # Handle None for reused_tokens (N/A if wheel doesn't expose it)
+            step_reused = metrics.get("reused_tokens")
+            if step_reused is not None:
+                totals["reused_tokens"] = (totals["reused_tokens"] or 0) + step_reused
             totals["energy_j"] += metrics.get("energy_j", 0)
         
         totals["client_tokens"] += task["client"]
